@@ -1,18 +1,25 @@
 #ifndef CORE_H
 #define CORE_H
 
+//STL
+#include <memory>
+#include <vector>
+
+//QT
 #include <QObject>
 #include <QList>
+#include <QThread>
 
 //My
 #include "Common/tdbloger.h"
-#include "tank.h"
 #include "tconfig.h"
+#include "tank.h"
 
 namespace LevelGaugeService
 {
 
-class Core : public QObject
+class Core
+    : public QObject
 {
     Q_OBJECT
 
@@ -30,17 +37,19 @@ signals:
    void stopAll();
 
 private:
-   void loadTankConfig();
+    struct TankThread
+    {
+        std::unique_ptr<Tank> tank;
+        std::unique_ptr<QThread> thread;
+    };
 
 private:
     TConfig* _cnf = nullptr;
     Common::TDBLoger* _loger = nullptr;
 
-    QSqlDatabase _db;
-
     QString _errorString;
 
-    QList<Tank::TankConfig> _tanks;  //список конфигураций резервуаров
+    std::vector<std::unique_ptr<TankThread>> _tanksThread;  //список конфигураций резервуаров
 
 };
 

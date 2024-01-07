@@ -1,7 +1,7 @@
 #ifndef SERVICE_H
 #define SERVICE_H
 
-
+//Qt
 #include <QString>
 
 //My
@@ -13,7 +13,8 @@
 namespace LevelGaugeService
 {
 
-class Service : public QtService::QtService<QCoreApplication>
+class Service
+    : public QtService::QtService<QCoreApplication>
 {
 public:
    explicit Service(int argc, char **argv);
@@ -23,14 +24,13 @@ public:
     bool isError() const { return !_errorString.isEmpty(); }
 
 protected:
-    void start() override;  //Запус сервиса
-    void pause() override;  //Установка сервиса на паузу
-    void resume() override; //Востановление сервиса после паузы
-    void stop() override;   //Остановка сервиса
+    virtual void start() override;  //Запус сервиса
+    virtual void pause() override;  //Установка сервиса на паузу
+    virtual void resume() override; //Востановление сервиса после паузы
+    virtual void stop() override;   //Остановка сервиса
 
 private:
     bool _isRun = false;
-
     TConfig* _cnf = nullptr;
     Common::TDBLoger* _loger = nullptr;
 

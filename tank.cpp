@@ -1,12 +1,17 @@
-#include "QMutex"
-#include "QMutexLocker"
-#include "QSqlError"
-#include "QSqlQuery"
+//Qt
+#include <QMutex>
+#include <QMutexLocker>
+#include <QSqlError>
+#include <QSqlQuery>
+
+#ifdef QT_DEBUG
+#include <QFile>
+#include <QTextStream>
+#endif
 
 #include "tank.h"
 
 using namespace LevelGaugeService;
-using namespace Common;
 
 static const float DELTA_INTAKE_VOLUME = 400.0; //пороговое значение изменения уровня топлива за 10 минут с котого считаем что произошел прием
 
@@ -28,7 +33,10 @@ static const Tank::Delta DELTA_MAX_INTAKE
     /*Temp*/1.0
 }; //максимально допустимое изменение параметров резервуара за 1 минуту при приеме топлива
 
-static Tank::AdditionFlag IntToAdditionFlag(quint8 status)
+static const int MIN_STEP_COUNT_START_INTAKE = 5;
+static const int MIN_STEP_COUNT_FINISH_INTAKE = 10;
+
+Tank::AdditionFlag IntToAdditionFlag(quint8 status)
 {
     switch (status)
     {
@@ -36,11 +44,11 @@ static Tank::AdditionFlag IntToAdditionFlag(quint8 status)
     case static_cast<quint8>(Tank::AdditionFlag::CALCULATE): return Tank::AdditionFlag::CALCULATE;
     case static_cast<quint8>(Tank::AdditionFlag::MANUAL): return Tank::AdditionFlag::MANUAL;
     }
-    return Tank::AdditionFlag::UNKNOW;
+    return Tank::AdditionFlag::UNKNOWN;
 }
 
 
-static Tank::AdditionFlag AdditionFlagIntToAdditionFlag(quint8 status)
+Tank::AdditionFlag AdditionFlagIntToAdditionFlag(quint8 status)
 {
     switch (status)
     {
@@ -48,10 +56,10 @@ static Tank::AdditionFlag AdditionFlagIntToAdditionFlag(quint8 status)
     case static_cast<quint8>(Tank::AdditionFlag::CALCULATE): return Tank::AdditionFlag::CALCULATE;
     case static_cast<quint8>(Tank::AdditionFlag::MANUAL): return Tank::AdditionFlag::MANUAL;
     }
-    return Tank::AdditionFlag::UNKNOW;
+    return Tank::AdditionFlag::UNKNOWN;
 }
 
-static int connectionNumber()
+int connectionNumber()
 {
     static QMutex mutex;
     static int connectionNumberValue = 0;
@@ -61,23 +69,17 @@ static int connectionNumber()
     return ++connectionNumberValue;
 }
 
-Tank::Tank(const TankConfig& tankConfig, QObject *parent)
+Tank::Tank(qint64 tankID, const Common::DBConnectionInfo& dbConnectionInfo,  QObject *parent /* = nullptr) */)
     : QObject{parent}
-    , _cnf(TConfig::config())
-    , _loger(Common::TDBLoger::DBLoger())
-    , _tankConfig(tankConfig)
+    , _dbConnectionInfo(dbConnectionInfo)
     , _dbConnectionName(QString("DB_%1").arg(connectionNumber()))
+    , rg(QRandomGenerator::global())
 {
-    Q_CHECK_PTR(_cnf);
-    Q_CHECK_PTR(_loger);
+    Q_ASSERT(tankID >= 0);
+    Q_ASSERT(!_dbConnectionInfo.db_DBName.isEmpty());
+    Q_ASSERT(!_dbConnectionInfo.db_Driver.isEmpty());
 
-    Q_ASSERT(!_tankConfig.AZSCode.isEmpty());
-    Q_ASSERT(!_tankConfig.dbNitName.isEmpty());
-    Q_ASSERT(_tankConfig.tankNumber != 0);
-    Q_ASSERT(_tankConfig.diametr < 1.0);
-    Q_ASSERT(_tankConfig.volume < 1.0);
-
-
+    _tankConfig.id = tankID;
 }
 
 Tank::~Tank()
@@ -92,53 +94,138 @@ Tank::~Tank()
     QSqlDatabase::removeDatabase(_dbConnectionName);
 }
 
-QString Tank::errorString()
-{
-    auto res = _errorString;
-    _errorString.clear();
-
-    return res;
-}
-
 void Tank::start()
 {
-    connectToDB();
+    if (!connectToDB())
+    {
+        emit errorOccurred(QString("Cannot connect to database. Error: %1").arg(_db.lastError().text()));
 
-    //Подключаем логер
-    QObject::connect(_loger, SIGNAL(sendLogMsg(int, const QString&)), SLOT(sendLogMsg(int, const QString&)), Qt::QueuedConnection);
+        return;
+    };
 
+    loadTankConfig();
     initFromSave();
 
-   //создаем основной рабочий таймер
+    //создаем основной рабочий таймер
     _timer = new QTimer();
     _timer->setSingleShot(false);
 
     QObject::connect(_timer, SIGNAL(timeout()), SLOT(calculate()));
 
-    _timer->start(60000);
+    _timer->start(60000 + (rg->bounded(200) - 100));
 
     calculate();
 }
 
-void Tank::connectToDB()
+void Tank::stop()
 {
+
+    emit finished();
+}
+
+bool Tank::connectToDB()
+{
+    Q_ASSERT(!_db.isOpen());
+
     //настраиваем подключение БД
-    const auto& dbConnectionInfo = _cnf->dbConnectionInfo();
-    _db = QSqlDatabase::addDatabase(dbConnectionInfo.db_Driver, _dbConnectionName);
-    _db.setDatabaseName(dbConnectionInfo.db_DBName);
-    _db.setUserName(dbConnectionInfo.db_UserName);
-    _db.setPassword(dbConnectionInfo.db_Password);
-    _db.setConnectOptions(dbConnectionInfo.db_ConnectOptions);
-    _db.setPort(dbConnectionInfo.db_Port);
-    _db.setHostName(dbConnectionInfo.db_Host);
+    _db = QSqlDatabase::addDatabase(_dbConnectionInfo.db_Driver, _dbConnectionName);
+    _db.setDatabaseName(_dbConnectionInfo.db_DBName);
+    _db.setUserName(_dbConnectionInfo.db_UserName);
+    _db.setPassword(_dbConnectionInfo.db_Password);
+    _db.setConnectOptions(_dbConnectionInfo.db_ConnectOptions);
+    _db.setPort(_dbConnectionInfo.db_Port);
+    _db.setHostName(_dbConnectionInfo.db_Host);
 
     //подключаемся к БД
-    if ((_db.isOpen()) || (!_db.open()))
-    {
-        _errorString = QString("Cannot connect to database. Error: %1").arg(_db.lastError().text());
+    return _db.open();
+}
 
-        return;
-    };
+void Tank::dbQueryExecute(QSqlQuery &query, const QString &queryText)
+{
+    Q_ASSERT(_db.isOpen());
+
+    if (!query.exec(queryText))
+    {
+        errorDBQuery(query);
+    }
+}
+
+void Tank::errorDBQuery(const QSqlQuery &query)
+{
+    Q_ASSERT(_db.isOpen());
+
+    emit errorOccurred(QString("Cannot execute query. Error: %1. Query: %2").arg(query.lastError().text()).arg(query.lastQuery()));
+
+    _db.rollback();
+}
+
+void Tank::dbQueryExecute(const QString &queryText)
+{
+    Q_ASSERT(_db.isOpen());
+
+    _db.transaction();
+    QSqlQuery query(_db);
+
+    dbQueryExecute(query, queryText);
+
+    dbCommit();
+}
+
+void Tank::dbCommit()
+{
+    Q_ASSERT(_db.isOpen());
+
+    if (!_db.commit())
+    {
+        emit errorOccurred(QString("Cannot commit trancsation. Error: %1").arg(_db.lastError().text()));
+
+        _db.rollback();
+    }
+}
+
+void Tank::loadTankConfig()
+{
+    Q_ASSERT(_db.isOpen());
+
+    _db.transaction();
+    QSqlQuery query(_db);
+    query.setForwardOnly(true);
+
+    //загружаем данные об АЗС
+    const QString queryText =
+            QString("SELECT [AZSCode], [TankNumber], [ServiceMode], [Volume], [Diametr], [Product], [LastSaveDateTime], [LastIntakeDateTime], [TimeShift], [LevelGaugeServiceDB] "
+                    "FROM [TanksInfo] "
+                    "WHERE [ID] = %1").arg(_tankConfig.id);
+
+    dbQueryExecute(query, queryText);
+
+    if (query.next())
+    {
+        _tankConfig.AZSCode = query.value("AZSCode").toString();
+        _tankConfig.tankNumber = query.value("TankNumber").toUInt();
+        _tankConfig.serviceMode = query.value("ServiceMode").toBool();
+        _tankConfig.dbNitName = query.value("LevelGaugeServiceDB").toString();//имя БД для сохранения результатов
+        _tankConfig.lastIntake = query.value("LastIntakeDateTime").toDateTime();
+        _tankConfig.timeShift = query.value("TimeShift").toInt(); //cмещение времени относительно сервера
+        _tankConfig.product =  query.value("Productr").toString();
+        _tankConfig.diametr = query.value("Diametr").toFloat();
+        _tankConfig.volume = query.value("Volume").toFloat();
+    }
+    else
+    {
+        emit errorOccurred(QString("Cannot load tank configuration with ID = %1").arg(_tankConfig.id));
+    }
+
+    dbCommit();
+}
+
+void Tank::makeLimits()
+{
+    _limits.density = std::make_pair<float>(350.0, 1200.0);
+    _limits.height  = std::make_pair<float>(0.0, _tankConfig.diametr);
+    _limits.mass    = std::make_pair<float>(0.0, _tankConfig.volume * _limits.density.second);
+    _limits.volume  = std::make_pair<float>(0.0, _tankConfig.volume);
+    _limits.temp    = std::make_pair<float>(-50.0, 100.0);
 }
 
 void Tank::initFromSave()
@@ -148,42 +235,39 @@ void Tank::initFromSave()
     QSqlQuery query(_db);
     query.setForwardOnly(true);
 
-    QString queryText =
+    const auto queryText =
         QString("SELECT [TankNumber], [DateTime], [Volume], [Mass], [Density], [Height], [Temp], [Flag] "
                 "FROM [TanksStatus] "
-                "WHERE [AZSCode] = '%1' AND [TankNumber] = %2 AND [DateTime] >= CAST('%3' AS DATETIME2) "
-                "ORDER BY [DateTime] ")
+                "WHERE [AZSCode] = '%1' AND [TankNumber] = %2 AND [DateTime] >= CAST('%3' AS DATETIME2)")
             .arg(_tankConfig.AZSCode)
             .arg(_tankConfig.tankNumber)
             .arg(_tankConfig.lastIntake.toString("yyyy-MM-dd hh:mm:ss.zzz"));
 
-    if (!query.exec(queryText))
-    {
-        errorDBQuery(_db, query);
-    }
+    dbQueryExecute(query, queryText);
 
     //сохраняем
     bool added = false;
     while (query.next())
     {
-        Status tmp;
-        tmp.density = query.value("Density").toFloat();
-        tmp.height = query.value("Height").toFloat() * 10; //переводим высоту обратно в мм
-        tmp.mass = query.value("Mass").toFloat();
-        tmp.temp = query.value("Temp").toFloat();
-        tmp.volume = query.value("Volume").toFloat();
-        tmp.flag = IntToAdditionFlag(query.value("Flag").toUInt());
+        auto tmp = std::make_unique<Status>();
+        tmp->density = query.value("Density").toFloat();
+        tmp->height = query.value("Height").toFloat() * 10; //переводим высоту обратно в мм
+        tmp->mass = query.value("Mass").toFloat();
+        tmp->temp = query.value("Temp").toFloat();
+        tmp->volume = query.value("Volume").toFloat();
+        tmp->flag = query.value("Flag").toUInt();
 
-        _tankStatus.insert(query.value("DateTime").toDateTime(), std::move(tmp));
+        _tankStatus.insert({query.value("DateTime").toDateTime(), std::move(tmp)});
 
         added = true;
     }
 
     if (added)
     {
-        _tankConfig.lastSave = _tankStatus.lastKey();
-        _tankConfig.lastMeasuments = _tankStatus.lastKey();
-        _tankConfig.lastCheck = _tankStatus.lastKey();
+        const auto lastDateTime = _tankStatus.rbegin()->first;
+        _tankConfig.lastSave = lastDateTime;
+        _tankConfig.lastMeasuments = lastDateTime;
+        _tankConfig.lastCheck = lastDateTime;
     }
     else
     {
@@ -192,7 +276,7 @@ void Tank::initFromSave()
         _tankConfig.lastCheck = _tankConfig.lastIntake;
     }
 
-    DBCommit(_db);
+    dbCommit();
 }
 
 void Tank::loadFromMeasument()
@@ -201,40 +285,43 @@ void Tank::loadFromMeasument()
     QSqlQuery query(_db);
     query.setForwardOnly(true);
 
-    QString queryText =
+    const auto queryText =
         QString("SELECT [ID], [DateTime], [Density], [Height], [Volume], [Mass], [Temp] "
                 "FROM [TanksMeasument] "
-                "WHERE [AZSCode] = '%1' AND [TankNumber] = %2 AND [DateTime] > CAST('%3' AS DATETIME2) "
-                "ORDER BY [DateTime] ")
+                "WHERE [AZSCode] = '%1' AND [TankNumber] = %2 AND [DateTime] > CAST('%3' AS DATETIME2) ")
             .arg(_tankConfig.AZSCode)
             .arg(_tankConfig.tankNumber)
             .arg(_tankConfig.lastMeasuments.toString("yyyy-MM-dd hh:mm:ss.zzz"));
 
-    if (!query.exec(queryText))
-    {
-        errorDBQuery(_db, query);
-    }
+    dbQueryExecute(query, queryText);
 
     while (query.next())
     {
-        Status tmp;
-        tmp.density = query.value("Density").toFloat();
-        tmp.height = query.value("Height").toFloat();
-        tmp.mass = query.value("Mass").toFloat();
-        tmp.temp = query.value("Temp").toFloat();
-        tmp.volume = query.value("Volume").toFloat();
-        tmp.flag = AdditionFlag::MEASUMENTS;
+        auto tmp = std::make_unique<Status>();
+        tmp->density = query.value("Density").toFloat();
+        tmp->height = query.value("Height").toFloat();
+        tmp->mass = query.value("Mass").toFloat();
+        tmp->temp = query.value("Temp").toFloat();
+        tmp->volume = query.value("Volume").toFloat();
+        tmp->flag = static_cast<quint8>(AdditionFlag::MEASUMENTS);
 
-        _tankStatus.insert(query.value("DateTime").toDateTime(), std::move(tmp));
+        _tankStatus.insert({query.value("DateTime").toDateTime(), std::move(tmp)});
 
         _tankConfig.lastMeasuments = query.value("DateTime").toDateTime();
     }
 
-    DBCommit(_db);
+    dbCommit();
 }
 
 void Tank::calculate()
 {
+    if (!_db.isOpen())
+    {
+        emit errorOccurred(QString("Connetion to DB %1 not open. Skip.").arg(_db.connectionName()));
+
+        return;
+    }
+
     //загружаем данные из БД с измерениями
     loadFromMeasument();
 
@@ -245,6 +332,7 @@ void Tank::calculate()
 
     //проверяем и добавляем недостающие записи статусов
     checkStatus();
+    checkLimits();
 
     saveToNitDB();
 
@@ -253,12 +341,17 @@ void Tank::calculate()
 
 void Tank::checkStatus()
 {
-    Q_ASSERT(!_tankStatus.empty());
-
-    //гарантируеться что _tankStatus не пустой
+    if (_tankStatus.empty())
+    {
+        return;
+    }
 
     //находим последний проверенный статус
-    auto tankStatusStartCheck_it = _tankStatus.lowerBound(_tankConfig.lastCheck);
+    auto tankStatusStartCheck_it = _tankStatus.lower_bound(_tankConfig.lastCheck);
+    if (tankStatusStartCheck_it == _tankStatus.end())
+    {
+        tankStatusStartCheck_it = addStatusStart(_tankConfig.lastCheck);
+    }
 
     //если это не самый конец вектора - то проверяем все имеющися
     if (tankStatusStartCheck_it != _tankStatus.end())
@@ -268,18 +361,18 @@ void Tank::checkStatus()
         {
             const auto tankStatus_prev_it = std::prev(tankStatus_it);
 
-            const auto tankStatusPrevDateTime = tankStatus_prev_it.key();
-            const auto tankStatusDateTime = tankStatus_it.key();
+            const auto tankStatusPrevDateTime = tankStatus_prev_it->first;
+            const auto tankStatusDateTime = tankStatus_it->first;
 
             const quint64 deltaTime = tankStatusPrevDateTime.secsTo(tankStatusDateTime); //в сек
             //сравниваем время между соседнями записами. Если разрыв более 120 секунд - необходимо добавить недостающие записи
-            if (deltaTime > 120)
+            if (deltaTime >= 118)
             {
                 //Возможные варианты:
                 //1. уровень уменьшился или остался прежний или увеличился менее допустимого(температурное расширение) - обычный режим работы АЗС
                 //2. уровень вырос больше допустимого - был приход
 
-                const auto deltaHeight = tankStatus_it.value().height - tankStatus_prev_it.value().height;
+                const auto deltaHeight = tankStatus_it->second->height - tankStatus_prev_it->second->height;
                 if (deltaHeight > DELTA_INTAKE_VOLUME)
                 {
                     tankStatus_it = addStatusIntake(tankStatus_prev_it, tankStatus_it);
@@ -291,46 +384,132 @@ void Tank::checkStatus()
             }
         }
     }
+    else
+    {
+
+    }
 
     //если с конца осутствует более 11 минут - то скорее всего обрыв связи с АЗС, поэтому добавляем
     //данные вручную
 
     const QDateTime currentDateTime = QDateTime::currentDateTime().addSecs(_tankConfig.timeShift); //Текущее время на АЗС
-    if (_tankStatus.lastKey().secsTo(currentDateTime) > 660)
+    if (_tankStatus.rbegin()->first.secsTo(currentDateTime) > 660)
     {
         addStatusEnd(currentDateTime);
     }
 }
 
-Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator start, Tank::TTankStatus::Iterator finish)
+void Tank::checkLimits()
+{
+    auto tankStatusStartCheck_it = _tankStatus.lower_bound(_tankConfig.lastCheck);
+    if (tankStatusStartCheck_it == _tankStatus.end())
+    {
+        return;
+    }
+
+    //проверяем что доступны все необходимые записи в середине имяющихся записей
+    for (auto tankStatus_it = tankStatusStartCheck_it; tankStatus_it != _tankStatus.end(); ++tankStatus_it)
+    {
+        auto status = tankStatus_it->second.get();
+
+        //density
+        if (status->density < _limits.density.first)
+        {
+            status->density = _limits.density.first;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+        else if (status->density > _limits.density.second)
+        {
+            status->density = _limits.density.second;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+
+        //height
+        if (status->height < _limits.height.first)
+        {
+            status->height = _limits.height.first;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+        else if (status->height> _limits.height.second)
+        {
+            status->height = _limits.height.second;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+
+        //mass
+        if (status->mass < _limits.mass.first)
+        {
+            status->mass = _limits.mass.first;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+        else if (status->mass> _limits.mass.second)
+        {
+            status->mass = _limits.mass.second;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+
+        //volume
+        if (status->volume < _limits.volume.first)
+        {
+            status->volume = _limits.volume.first;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+        else if (status->volume> _limits.volume.second)
+        {
+            status->volume = _limits.volume.second;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+
+        //temp
+        if (status->temp < _limits.temp.first)
+        {
+            status->temp = _limits.temp.first;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+        else if (status->temp> _limits.temp.second)
+        {
+            status->temp = _limits.temp.second;
+            status->flag = status->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+        }
+    }
+}
+
+Tank::TankStatusIterator Tank::addStatusRange(Tank::TankStatusIterator start, Tank::TankStatusIterator finish)
 {
     Q_ASSERT(start != _tankStatus.end());
     Q_ASSERT(finish != _tankStatus.end());
 
-    QDateTime time = start.key();  //время на текущем шаге
+    auto time = start->first;  //время на текущем шаге
+    const auto timeFinish = finish->first;  //время на текущем шаге
 
     //вычисляем дельту (значения нужно именно скопироватть, т.к. итераторы могут стать недействительными)
-    const auto startStatus = start.value();
-    const auto finishStatus = finish.value();
+    const auto startStatus(*start->second.get());
+    auto finishStatus(*finish->second.get());
 
-    int stepCount = static_cast<int>(time.secsTo(finish.key()) / 60.0) - 1 ; //количество шагов которое у нас есть для вставки
-    if (stepCount < 1) 
-    {
-        return start;
-    }
+    //количество шагов которое у нас есть для вставки
+    int startStepCount = static_cast<int>(static_cast<double>(time.secsTo(timeFinish)) / 60.0) - 1 ;
+    startStepCount = startStepCount < 1 ? 1 : startStepCount;
+    int stepCount= startStepCount;
     
-    //Вычисляем необходимые дельты. Дельта слишком большая - приделься перезаписать часть уже имеющихся данных
-
+    //Вычисляем необходимые дельты. Дельта слишком большая - придется перезаписать часть уже имеющихся данных
     Delta delta;
-    bool controlDelta = false;
-    
+
     do
     {
         delta.density = (finishStatus.density - startStatus.density) / static_cast<float>(stepCount);
         if (std::abs(delta.density) > DELTA_MAX.density)
         {
             stepCount = (finishStatus.density - startStatus.density) / DELTA_MAX.density;
-            
+            const int stepAddiotion = stepCount - startStepCount; //количество добавляемыш шагов
+            if (std::distance(finish, _tankStatus.end()) < stepAddiotion)
+            {
+                finishStatus = *(std::next(finish, stepAddiotion)->second.get());
+            }
+            else
+            {
+                finishStatus = *(_tankStatus.rbegin()->second.get());
+            }
+
             continue;
         }
         
@@ -338,7 +517,16 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
         if (std::abs(delta.height) > DELTA_MAX.height)
         {
             stepCount = (finishStatus.height - startStatus.height) / DELTA_MAX.height;
-            
+            const int stepAddiotion = stepCount - startStepCount; //количество добавляемыш шагов
+            if (std::distance(finish, _tankStatus.end()) < stepAddiotion)
+            {
+                finishStatus = *(std::next(finish, stepAddiotion)->second.get());
+            }
+            else
+            {
+                finishStatus = *(_tankStatus.rbegin()->second.get());
+            }
+
             continue;
         }
  
@@ -346,7 +534,16 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
         if (std::abs(delta.temp) > DELTA_MAX.temp)
         {
             stepCount = (finishStatus.temp - startStatus.temp) / DELTA_MAX.temp;
-            
+            const int stepAddiotion = stepCount - startStepCount; //количество добавляемыш шагов
+            if (std::distance(finish, _tankStatus.end()) < stepAddiotion)
+            {
+                finishStatus = *(std::next(finish, stepAddiotion)->second.get());
+            }
+            else
+            {
+                finishStatus = *(_tankStatus.rbegin()->second.get());
+            }
+
             continue;
         }
         
@@ -354,7 +551,16 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
         if (std::abs(delta.volume) > DELTA_MAX.volume)
         {
             stepCount = (finishStatus.volume - startStatus.volume) / DELTA_MAX.volume;
-            
+            const int stepAddiotion = stepCount - startStepCount; //количество добавляемыш шагов
+            if (std::distance(finish, _tankStatus.end()) < stepAddiotion)
+            {
+                finishStatus = *(std::next(finish, stepAddiotion)->second.get());
+            }
+            else
+            {
+                finishStatus = *(_tankStatus.rbegin()->second.get());
+            }
+
             continue;
         }
         
@@ -362,17 +568,26 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
         if (std::abs(delta.mass) > DELTA_MAX.mass)
         {
             stepCount = (finishStatus.mass - startStatus.mass) / DELTA_MAX.mass;
-            
+            const int stepAddiotion = stepCount - startStepCount; //количество добавляемыш шагов
+            if (std::distance(finish, _tankStatus.end()) < stepAddiotion)
+            {
+                finishStatus = *(std::next(finish, stepAddiotion)->second.get());
+            }
+            else
+            {
+                finishStatus = *(_tankStatus.rbegin()->second.get());
+            }
+
             continue;
         }
         
         //если мы дошли до сюда, то все ок и дельты расчитаны правильно
-        controlDelta = true;
+        break;
     }    
-    while (!controlDelta);
+    while (true);
 
-    Status tmp(startStatus);
-    tmp.flag = AdditionFlag::CALCULATE;
+    auto tmp = Status(startStatus);
+    tmp.flag = static_cast<quint8>(AdditionFlag::CALCULATE);
 
     auto tankStatus_it = start;
     for (auto i = 0; i < stepCount; ++i)
@@ -385,16 +600,14 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
 
         time = time.addSecs(60);
         
-        auto lowerBoundTankStatus_it = _tankStatus.lowerBound(time);
-        
-        if (lowerBoundTankStatus_it.key().secsTo(time) < 45) 
+        //пока вставляем в свободное место - просто вставляем
+        if (time < timeFinish.addSecs(-45))
         {
-            *lowerBoundTankStatus_it = tmp;
-            tankStatus_it = lowerBoundTankStatus_it;
+            tankStatus_it = _tankStatus.insert({time.addMSecs(rg->bounded(-1000, +1000)) , std::make_unique<Status>(tmp)}).first;
         }
-        else 
+        else
         {
-            tankStatus_it = _tankStatus.insert(time.addMSecs(rg->bounded(-1000, +1000)) , tmp);
+            insertTankStatus(time, tmp);
         }
 
         //добавить рандомный +/-
@@ -404,39 +617,29 @@ Tank::TTankStatus::Iterator Tank::addStatusRange(Tank::TTankStatus::Iterator sta
     return tankStatus_it;
 }
 
-Tank::TTankStatus::Iterator Tank::addStatusIntake(Tank::TTankStatus::Iterator start, Tank::TTankStatus::Iterator finish)
+Tank::TankStatusIterator Tank::addStatusIntake(Tank::TankStatusIterator start, Tank::TankStatusIterator finish)
 {
     Q_ASSERT(start != _tankStatus.end());
     Q_ASSERT(finish != _tankStatus.end());
 
-    QDateTime time = start.key();  //время на текущем шаге
+    QDateTime time = start->first;  //время на текущем шаге
 
     //расчитываем сколько шагов нужно для подъема уровня
-    const auto startStatus = start.value();
-    const auto finishStatus = finish.value();
+    const auto startStatus = *(start->second.get());
+    const auto finishStatus = *(finish->second.get());
 
-    const int intakeStepCount = static_cast<int>((finish.value().height - start.value().height) / (DELTA_MAX_INTAKE.height * 0.95));
+    const int intakeStepCount = static_cast<int>((finish->second->height - start->second->height) / (DELTA_MAX_INTAKE.height * 0.95));
     
     Status tmp(startStatus);
-    tmp.flag = AdditionFlag::CALCULATE;
+    tmp.flag = static_cast<quint8>(AdditionFlag::CALCULATE);
 
     //вставляем полочку в начале
     auto tankStatus_it = start;
-    for (auto i = 0; i < 5; ++i)
+    for (auto i = 0; i < MIN_STEP_COUNT_START_INTAKE; ++i)
     {
         time = time.addSecs(60);
 
-        auto lowerBoundTankStatus_it = _tankStatus.lowerBound(time);
-
-        if (lowerBoundTankStatus_it.key().secsTo(time) < 45)
-        {
-            *lowerBoundTankStatus_it = tmp;
-            tankStatus_it = lowerBoundTankStatus_it;
-        }
-        else
-        {
-            tankStatus_it = _tankStatus.insert(time.addMSecs(rg->bounded(-1000, +1000)) , tmp);
-        }
+        tankStatus_it = insertTankStatus(time, tmp);
 
         //добавить рандомный +/-
         addRandom(tankStatus_it);
@@ -459,38 +662,18 @@ Tank::TTankStatus::Iterator Tank::addStatusIntake(Tank::TTankStatus::Iterator st
 
         time = time.addSecs(60);
 
-        auto lowerBoundTankStatus_it = _tankStatus.lowerBound(time);
-
-        if (lowerBoundTankStatus_it.key().secsTo(time) < 45)
-        {
-            *lowerBoundTankStatus_it = tmp;
-            tankStatus_it = lowerBoundTankStatus_it;
-        }
-        else
-        {
-            tankStatus_it = _tankStatus.insert(time.addMSecs(rg->bounded(-1000, +1000)) , tmp);
-        }
+        tankStatus_it = insertTankStatus(time, tmp);
 
         //добавить рандомный +/-
         addRandom(tankStatus_it);
     }
 
     //вставляем полочку в конце
-    for (auto i = 0; i < 10; ++i)
+    for (auto i = 0; i < MIN_STEP_COUNT_FINISH_INTAKE; ++i)
     {
         time = time.addSecs(60);
 
-        auto lowerBoundTankStatus_it = _tankStatus.lowerBound(time);
-
-        if (lowerBoundTankStatus_it.key().secsTo(time) < 45)
-        {
-            *lowerBoundTankStatus_it = tmp;
-            tankStatus_it = lowerBoundTankStatus_it;
-        }
-        else
-        {
-            tankStatus_it = _tankStatus.insert(time.addMSecs(rg->bounded(-1000, +1000)) , tmp);
-        }
+        tankStatus_it = insertTankStatus(time, tmp);
 
         //добавить рандомный +/-
         addRandom(tankStatus_it);
@@ -503,145 +686,157 @@ void Tank::addStatusEnd(const QDateTime& finish)
 {
     Q_ASSERT(!_tankStatus.empty());
 
-    QDateTime time = _tankStatus.lastKey();  //время на текущем шаге
+    auto time = _tankStatus.rbegin()->first;  //время на текущем шаге
 
-    Status tmp = _tankStatus.last();
-    tmp.flag = AdditionFlag::CALCULATE;
+    auto tmp = *(_tankStatus.rbegin()->second.get());
+    tmp.flag = static_cast<quint8>(AdditionFlag::CALCULATE);
 
     while (time.secsTo(finish) >= 30)
     {
         time = time.addSecs(60);
 
-        auto tankStatus_it = _tankStatus.insert(time.addMSecs(rg->bounded(-1000, +1000)) , tmp);
+        auto tankStatus_it = _tankStatus.insert({time.addMSecs(rg->bounded(-1000, +1000)) , std::make_unique<Status>(tmp)}).first;
 
         //добавить рандомный +/-
         addRandom(tankStatus_it);
     }
 }
 
-void Tank::addRandom(Tank::TTankStatus::Iterator it)
+Tank::TankStatusIterator Tank::addStatusStart(const QDateTime &start)
 {
-    it->density += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 0.1;
-    it->height  += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 1;
-    it->temp    += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 0.1;
-    it->volume  += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 10;
-    it->mass    += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 10;
+    Q_ASSERT(!_tankStatus.empty());
+
+    auto tankStatus_it = _tankStatus.begin();
+
+    auto time = start;  //время на текущем шаге
+
+    auto tmp = *(_tankStatus.begin()->second.get());
+    tmp.flag = static_cast<quint8>(AdditionFlag::CALCULATE);
+
+    while (time.secsTo(_tankStatus.begin()->first) >= 30)
+    {
+        time = time.addSecs(60);
+
+        tankStatus_it = _tankStatus.insert({time.addMSecs(rg->bounded(-1000, +1000)) , std::make_unique<Status>(tmp)}).first;
+
+        //добавить рандомный +/-
+        addRandom(tankStatus_it);
+    }
+
+    return tankStatus_it;
+}
+
+void Tank::addRandom(Tank::TankStatusIterator it)
+{
+    it->second->density += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 0.1f;
+    it->second->height  += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 1.0f;
+    it->second->temp    += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 0.1f;
+    it->second->volume  += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 10.0f;
+    it->second->mass    += round(static_cast<float>(rg->bounded(-100, +100)) / 200.0) * 10.0f;
 }
 
 void Tank::saveToNitDB()
 {
     Q_ASSERT(_db.isOpen());
 
-    _db.transaction();
-    QSqlQuery query(_db);
-
-    for (auto tankStatus_it = _tankStatus.upperBound(_tankConfig.lastSave);
-         tankStatus_it != _tankStatus.end() && tankStatus_it.key() <= QDateTime::currentDateTime();
+    auto lastSaveDateTime = _tankConfig.lastSave;
+    for (auto tankStatus_it = _tankStatus.upper_bound(_tankConfig.lastSave);
+         tankStatus_it != _tankStatus.end() && tankStatus_it->first <= QDateTime::currentDateTime();
          ++tankStatus_it)
     {
-        //Сохряняем в БД НИТа
-        QString queryText =
-            QString("INSERT INTO [%1].[dbo].[TanksStatus] ([DateTime], [AZSCode], [TankNumber], [Product], [Height], [Volume], [Temp], [Density], [Mass]) "
-                    "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', %6, %7, %8, %9, %10)")
-                .arg(_tankConfig.dbNitName)
-                .arg(tankStatus_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-                .arg(_tankConfig.AZSCode)
-                .arg(_tankConfig.tankNumber)
-                .arg(_tankConfig.product)
-                .arg(tankStatus_it->height / 10.0, 0, 'f', 1)
-                .arg(tankStatus_it->volume, 0, 'f', 0)
-                .arg(tankStatus_it->temp, 0, 'f', 1)
-                .arg(tankStatus_it->density, 0, 'f', 1)
-                .arg(tankStatus_it->mass, 0, 'f', 0);
-
-        //qDebug() << QueryText
-
-        if (!query.exec(queryText))
+        if (!_tankConfig.serviceMode)
         {
-            errorDBQuery(_db, query);
+            //Сохряняем в БД НИТа
+            const auto queryText =
+                QString("INSERT INTO [%1].[dbo].[TanksStatus] ([DateTime], [AZSCode], [TankNumber], [Product], [Height], [Volume], [Temp], [Density], [Mass]) "
+                        "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', %6, %7, %8, %9, %10)")
+                    .arg(_tankConfig.dbNitName)
+                    .arg(tankStatus_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                    .arg(_tankConfig.AZSCode)
+                    .arg(_tankConfig.tankNumber)
+                    .arg(_tankConfig.product)
+                    .arg(tankStatus_it->second->height / 10.0, 0, 'f', 1)
+                    .arg(tankStatus_it->second->volume, 0, 'f', 0)
+                    .arg(tankStatus_it->second->temp, 0, 'f', 1)
+                    .arg(tankStatus_it->second->density, 0, 'f', 1)
+                    .arg(tankStatus_it->second->mass, 0, 'f', 0);
+
+            dbQueryExecute(queryText);
         }
 
         //Сохраняем в нашу БД
-        queryText =
+        const auto queryText =
             QString("INSERT INTO [TanksStatus] ([DateTime], [LoadDateTime], [AZSCode], [TankNumber], [Product], [Height], [Volume], [Temp], [Density], [Mass], [Flag]) "
                            "VALUES (CAST('%2' AS DATETIME2), CAST('%3' AS DATETIME2),'%4', %5, '%6', %7, %8, %9, %10, %11, %12)")
                 .arg(_tankConfig.dbNitName)
-                .arg(tankStatus_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(tankStatus_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
                 .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz"))
                 .arg(_tankConfig.AZSCode)
                 .arg(_tankConfig.tankNumber)
                 .arg(_tankConfig.product)
-                .arg(tankStatus_it->height / 10.0, 0, 'f', 1)
-                .arg(tankStatus_it->volume, 0, 'f', 0)
-                .arg(tankStatus_it->temp, 0, 'f', 1)
-                .arg(tankStatus_it->density, 0, 'f', 1)
-                .arg(tankStatus_it->mass, 0, 'f', 0)
-                .arg(static_cast<quint8>(tankStatus_it->flag));
+                .arg(tankStatus_it->second->height / 10.0, 0, 'f', 1)
+                .arg(tankStatus_it->second->volume, 0, 'f', 0)
+                .arg(tankStatus_it->second->temp, 0, 'f', 1)
+                .arg(tankStatus_it->second->density, 0, 'f', 1)
+                .arg(tankStatus_it->second->mass, 0, 'f', 0)
+                .arg(static_cast<quint8>(tankStatus_it->second->flag));
 
-          //qDebug() << QueryText
+        dbQueryExecute(queryText);
 
-        if (!query.exec(queryText))
-        {
-            errorDBQuery(_db, query);
-        }
+        lastSaveDateTime = tankStatus_it->first;
     }
 
-    DBCommit(_db);
+    dbCommit();
 
-    _tankConfig.lastSave = _tankStatus.lastKey(); //обновляем дату пoследей отправленной записи
+    _tankConfig.lastSave = lastSaveDateTime; //обновляем дату пoследей отправленной записи
 }
 
 void Tank::saveIntake()
 {
     auto start_it = Tank::getStartIntake();
-    if (start_it != _tankStatus.end())
+    if (start_it == _tankStatus.end())
     {
         return;
     }
 
     auto finish_it = Tank::getFinishedIntake();
-    if (finish_it != _tankStatus.end())
+    if (finish_it == _tankStatus.end())
     {
         return;
     }
 
     //если есть начало и конец-то регистрируем приход
-    _db.transaction();
-    QSqlQuery query(_db);
-
-    //сохраняем приход в БД НИТа
-    QString queryText =
-        QString("INSERT INTO [%1].[dbo].[AddProduct] "
-                "([DateTime], [AZSCode], [TankNumber], [Product], [StartDateTime], [FinishedDateTime], [Height], [Volume], [Temp], [Density], [Mass])"
-                "VALUES (CAST('%1' AS DATETIME2), '%2', %3, '%4', CAST('%5' AS DATETIME2), CAST('%6' AS DATETIME2), %7, %8, %9, %10, %11, %12)")
-            .arg(_tankConfig.dbNitName)
-            .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-            .arg(_tankConfig.AZSCode)
-            .arg(_tankConfig.tankNumber)
-            .arg(_tankConfig.product)
-            .arg(start_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-            .arg(finish_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-            .arg(finish_it->height / 10.0, 0, 'f', 1)
-            .arg(finish_it->volume, 0, 'f', 0)
-            .arg(finish_it->temp, 0, 'f', 1)
-            .arg(finish_it->density, 0, 'f', 1)
-            .arg(finish_it->mass, 0, 'f', 0);
-
-    // qDebug() << QueryText;
-
-    if (!query.exec(queryText))
+    if (!_tankConfig.serviceMode)
     {
-       errorDBQuery(_db, query);
+        //сохраняем приход в БД НИТа
+        const auto queryText =
+            QString("INSERT INTO [%1].[dbo].[AddProduct] "
+                    "([DateTime], [AZSCode], [TankNumber], [Product], [StartDateTime], [FinishedDateTime], [Height], [Volume], [Temp], [Density], [Mass]) "
+                    "VALUES (CAST('%1' AS DATETIME2), '%2', %3, '%4', CAST('%5' AS DATETIME2), CAST('%6' AS DATETIME2), %7, %8, %9, %10, %11, %12)")
+                .arg(_tankConfig.dbNitName)
+                .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(_tankConfig.AZSCode)
+                .arg(_tankConfig.tankNumber)
+                .arg(_tankConfig.product)
+                .arg(start_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(finish_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(finish_it->second->height / 10.0, 0, 'f', 1)
+                .arg(finish_it->second->volume, 0, 'f', 0)
+                .arg(finish_it->second->temp, 0, 'f', 1)
+                .arg(finish_it->second->density, 0, 'f', 1)
+                .arg(finish_it->second->mass, 0, 'f', 0);
+
+        dbQueryExecute(queryText);
     }
 
-    quint8 flag = static_cast<quint8>(AdditionFlag::UNKNOW);
+    quint8 flag = static_cast<quint8>(AdditionFlag::UNKNOWN);
     for (auto it = start_it; it != finish_it; it ++)
     {
-         flag = flag | static_cast<quint8>(it->flag);
+         flag = flag | static_cast<quint8>(it->second->flag);
     }
 
     //вставляем в нашу таблицу
-    queryText =
+    auto queryText =
             QString("INSERT INTO [TanksIntake] "
                     "([DateTime], [AZSCode], [TankNumber], [Product],   "
                     " [StartDateTime] ,[StartHeight], [StartVolume], [StartTemp], [StartDensity], [StartMass], "
@@ -655,62 +850,48 @@ void Tank::saveIntake()
                 .arg(_tankConfig.AZSCode)
                 .arg(_tankConfig.tankNumber)
                 .arg(_tankConfig.product)
-                .arg(start_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-                .arg(start_it->height / 10.0, 0, 'f', 1)
-                .arg(start_it->volume, 0, 'f', 0)
-                .arg(start_it->temp, 0, 'f', 1)
-                .arg(start_it->density, 0, 'f', 1)
-                .arg(start_it->mass, 0, 'f', 0)
-                .arg(finish_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
-                .arg(finish_it->height / 10.0, 0, 'f', 1)
-                .arg(finish_it->volume, 0, 'f', 0)
-                .arg(finish_it->temp, 0, 'f', 1)
-                .arg(finish_it->density, 0, 'f', 1)
-                .arg(finish_it->mass, 0, 'f', 0)
+                .arg(start_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(start_it->second->height / 10.0, 0, 'f', 1)
+                .arg(start_it->second->volume, 0, 'f', 0)
+                .arg(start_it->second->temp, 0, 'f', 1)
+                .arg(start_it->second->density, 0, 'f', 1)
+                .arg(start_it->second->mass, 0, 'f', 0)
+                .arg(finish_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                .arg(finish_it->second->height / 10.0, 0, 'f', 1)
+                .arg(finish_it->second->volume, 0, 'f', 0)
+                .arg(finish_it->second->temp, 0, 'f', 1)
+                .arg(finish_it->second->density, 0, 'f', 1)
+                .arg(finish_it->second->mass, 0, 'f', 0)
                 .arg(flag);
 
-    // qDebug() << QueryText;
-
-    if (!query.exec(queryText))
-    {
-       errorDBQuery(_db, query);
-    }
+    dbQueryExecute(queryText);
 
     //обновляем информацию о найденном сливае
     queryText = QString("UPDATE [TanksInfo] SET "
                         "[LastIntakeDateTime] = CAST('%1' AS DATETIME2) "
                         "WHERE ([AZSCode] = '%2') AND ([TankNumber] =%2) ")
-                    .arg(finish_it.key().toString("yyyy-MM-dd hh:mm:ss.zzz"))
+                    .arg(finish_it->first.toString("yyyy-MM-dd hh:mm:ss.zzz"))
                     .arg(_tankConfig.AZSCode)
                     .arg(_tankConfig.tankNumber);
 
-    // qDebug() << QueryText;
+    dbQueryExecute(queryText);
 
-    if (!query.exec(queryText))
-    {
-       errorDBQuery(_db, query);
-    }
-
-    DBCommit(_db);
-
-    _tankConfig.lastIntake = finish_it.key();
+    _tankConfig.lastIntake = finish_it->first;
 }
 
-Tank::TTankStatus::Iterator Tank::getStartIntake()
+Tank::TankStatusIterator Tank::getStartIntake()
 {
-    static const int MIN_STEP_COUNT = 5;
-
-    auto startTankStatus_it = _tankStatus.upperBound(_tankConfig.lastIntake);
-    if (std::distance(startTankStatus_it, _tankStatus.end()) <= MIN_STEP_COUNT)
+    auto startTankStatus_it = _tankStatus.upper_bound(_tankConfig.lastIntake);
+    if (std::distance(startTankStatus_it, _tankStatus.end()) <= MIN_STEP_COUNT_START_INTAKE)
     {
         return _tankStatus.end();
     }
 
-    for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT);
+    for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT_START_INTAKE);
          finishTankStatus_it != _tankStatus.end();
          ++finishTankStatus_it)
     {
-        if (finishTankStatus_it.value().volume - startTankStatus_it->volume >= DELTA_INTAKE_VOLUME)
+        if (finishTankStatus_it->second->volume - startTankStatus_it->second->volume >= DELTA_INTAKE_VOLUME)
         {
             return finishTankStatus_it;
         }
@@ -720,21 +901,19 @@ Tank::TTankStatus::Iterator Tank::getStartIntake()
     return _tankStatus.end();
 }
 
-Tank::TTankStatus::Iterator Tank::getFinishedIntake()
+Tank::Tank::TankStatusIterator Tank::getFinishedIntake()
 {
-    static const int MIN_STEP_COUNT = 10;
-
-    auto startTankStatus_it = _tankStatus.upperBound(_tankConfig.lastIntake);
-    if (std::distance(startTankStatus_it, _tankStatus.end()) <= MIN_STEP_COUNT)
+    auto startTankStatus_it = _tankStatus.upper_bound(_tankConfig.lastIntake);
+    if (std::distance(startTankStatus_it, _tankStatus.end()) <= MIN_STEP_COUNT_FINISH_INTAKE)
     {
         return _tankStatus.end();
     }
 
-    for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT);
+    for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT_FINISH_INTAKE);
          finishTankStatus_it != _tankStatus.end();
          ++finishTankStatus_it)
     {
-        if (finishTankStatus_it.value().volume - startTankStatus_it->volume <= 0.0)
+        if (finishTankStatus_it->second->volume - startTankStatus_it->second->volume <= 0.0)
         {
             return startTankStatus_it;
         }
@@ -742,5 +921,38 @@ Tank::TTankStatus::Iterator Tank::getFinishedIntake()
         ++startTankStatus_it;
     }
     return _tankStatus.end();
+}
+
+Tank::TankStatusIterator Tank::insertTankStatus(const QDateTime dateTime, const Status &status)
+{
+    Tank::TankStatusIterator result = _tankStatus.end();
+
+    //Ищем ближайшую соотвествующую запись
+    auto upperBoundTankStatus_it = _tankStatus.upper_bound(dateTime);
+    if (upperBoundTankStatus_it == _tankStatus.end())
+    {
+        result = _tankStatus.insert({dateTime.addMSecs(rg->bounded(-1000, +1000)) , std::make_unique<Status>(status)}).first;
+    }
+    else
+    {
+        if (std::abs(upperBoundTankStatus_it->first.secsTo(dateTime)) < 45)
+        {
+            auto tmp = std::make_unique<Status>(status);
+            tmp->flag = tmp->flag | static_cast<quint8>(AdditionFlag::CORRECTED);
+            upperBoundTankStatus_it->second.swap(tmp);
+            result = upperBoundTankStatus_it;
+        }
+        else
+        {
+            result = _tankStatus.insert({dateTime.addMSecs(rg->bounded(-1000, +1000)) , std::make_unique<Status>(status)}).first;
+        }
+    }
+
+    if (result != _tankStatus.end() && result->first < _tankConfig.lastCheck)
+    {
+        _tankConfig.lastCheck = result->first;
+    }
+
+    return result;
 }
 

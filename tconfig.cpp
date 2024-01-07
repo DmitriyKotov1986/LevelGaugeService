@@ -8,7 +8,6 @@
 using namespace  LevelGaugeService;
 
 //static
-
 static TConfig* configPtr = nullptr;
 
 TConfig* TConfig::config(const QString& configFileName)
@@ -41,7 +40,7 @@ TConfig::TConfig(const QString& configFileName) :
 
         return;
     }
-    if (!QFileInfo(_configFileName).exists()) {
+    if (!QFileInfo::exists(_configFileName)) {
         _errorString = "Configuration file not exist. File name: " + _configFileName;
 
         return;
@@ -101,7 +100,8 @@ bool TConfig::save()
 
     ini.sync();
 
-    if (_sys_DebugMode) {
+    if (_sys_DebugMode)
+    {
         qDebug() << QString("%1 %2").arg(QTime::currentTime().toString("hh:mm:ss")).arg("Save configuration to " +  _configFileName);
     }
 

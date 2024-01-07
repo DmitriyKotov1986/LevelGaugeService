@@ -8,11 +8,11 @@ CONFIG -= app_bundle
 # In order to do so, uncomment the following line.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
-INCLUDEPATH += $$PWD/../../Common/Headers
-INCLUDEPATH += $$PWD/../../QtService/Headers
+INCLUDEPATH += $$PWD/../../../Common/Headers
+INCLUDEPATH += $$PWD/../../../QtService/Headers
 
-LIBS+= -L$$PWD/../../Common/Lib -lCommon
-LIBS+= -L$$PWD/../../QtService/Lib -lQtService
+LIBS+= -L$$PWD/../../../Common/Lib -lCommon
+LIBS+= -L$$PWD/../../../QtService/Lib -lQtService
 
 SOURCES += \
         core.cpp \
@@ -28,7 +28,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 HEADERS += \
     core.h \
-    levelgaugehost.h \
     service.h \
     tank.h \
     tconfig.h
