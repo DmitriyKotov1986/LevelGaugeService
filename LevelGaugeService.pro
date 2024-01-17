@@ -16,8 +16,10 @@ LIBS+= -L$$PWD/../../../QtService/Lib -lQtService
 
 SOURCES += \
         core.cpp \
+    intake.cpp \
         main.cpp \
         service.cpp \
+        sync.cpp \
         tank.cpp \
         tconfig.cpp \
 
@@ -27,8 +29,11 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
 HEADERS += \
+    commondefines.h \
     core.h \
+    intake.h \
     service.h \
+    sync.h \
     tank.h \
     tconfig.h
 

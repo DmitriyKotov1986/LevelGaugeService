@@ -4,9 +4,11 @@
 #include <QSqlError>
 
 //My
-#include "Common/common.h"
+#include "common/common.h"
+#include "commondefines.h"
 
 #include "core.h"
+
 
 using namespace LevelGaugeService;
 using namespace Common;
@@ -35,6 +37,28 @@ QString Core::errorString()
     return res;
 }
 
+bool Core::startSync()
+{
+    auto syncThread = std::make_unique<SyncThread>();
+    syncThread->sync = std::make_unique<Sync>();
+    syncThread->thread = std::make_unique<QThread>();
+    syncThread->sync->moveToThread(syncThread->thread.get());
+
+    //запускаем обработку стазу после создания потока
+    QObject::connect(syncThread->thread.get(), SIGNAL(started()), syncThread->sync.get(), SLOT(start()), Qt::QueuedConnection);
+
+    //тормозим поток при отключении сервера
+    QObject::connect(this, SIGNAL(stopAll()), syncThread->sync.get(), SLOT(stop()), Qt::QueuedConnection);
+
+    //ставим поток на удаление когда он сам завершился
+    QObject::connect(syncThread->sync.get(), SIGNAL(finished()), syncThread->thread.get(), SLOT(quit()));
+
+    //запускаем поток на выполнение
+    syncThread->thread->start(QThread::NormalPriority);
+
+    return true;
+}
+
 void Core::start()
 {
     //настраиваем подключение БД
@@ -52,7 +76,7 @@ void Core::start()
     //подключаемся к БД
     if (!db.open())
     {
-        _errorString = QString("Cannot connect to database. Error: %1").arg(db.lastError().text());
+        _errorString = connectDBErrorString(db);
         QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
 
         return;
@@ -65,13 +89,13 @@ void Core::start()
 
     //загружаем данные об АЗС
     const auto queryText =
-            QString("SELECT [ID] "
+            QString("SELECT [AZSCode], [TankNumber] "
                     "FROM [TanksInfo] "
                     "WHERE A.[Enabled] <> 0");
 
     if (!query.exec(queryText))
     {
-        _errorString = QString("Cannot execute query. Error: %1. Query: %2").arg(query.lastError().text()).arg(query.lastQuery());
+        _errorString = executeDBErrorString(db, query);
 
         db.rollback();
         db.close();
@@ -82,17 +106,17 @@ void Core::start()
 
     while (query.next())
     {
-        qint64 id = query.value("ID").toLongLong();
+        TankID id{query.value("AZSCode").toString(), static_cast<quint8>(query.value("TankNumber").toUInt())};
         auto tankThread = std::make_unique<TankThread>(); //tank удалиться при остановке потока
         tankThread->tank = std::make_unique<Tank>(id, dbConnectionInfo);
         tankThread->thread =  std::make_unique<QThread>();
         tankThread->tank->moveToThread(tankThread->thread.get());
 
         //запускаем обработку стазу после создания потока
-        QObject::connect(tankThread->thread.get(), SIGNAL(started()), tankThread->tank.get(), SLOT(start()));
+        QObject::connect(tankThread->thread.get(), SIGNAL(started()), tankThread->tank.get(), SLOT(start()), Qt::QueuedConnection);
 
         //тормозим поток при отключении сервера
-        QObject::connect(this, SIGNAL(stopAll()), tankThread->tank.get(), SLOT(stop()));
+        QObject::connect(this, SIGNAL(stopAll()), tankThread->tank.get(), SLOT(stop()), Qt::QueuedConnection);
 
         //ставим поток на удаление когда он сам завершился
         QObject::connect(tankThread->tank.get(), SIGNAL(finished()), tankThread->thread.get(), SLOT(quit()));
@@ -105,9 +129,11 @@ void Core::start()
 
     if (!db.commit())
     {
-        _errorString = QString("Cannot commit trancsation. Error: %1").arg(db.lastError().text());
+        _errorString = commitDBErrorString(db);
+
         db.rollback();
         db.close();
+
         QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
 
         return;
@@ -116,6 +142,10 @@ void Core::start()
     db.close();
     QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
 
+    if (!startSync())
+    {
+        _errorString = QString("Cannot start sync");
+    }
 }
 
 void Core::stop()
@@ -124,8 +154,20 @@ void Core::stop()
 
     for (const auto& thread: _tanksThread)
     {
-        thread->thread->wait();
+        Q_CHECK_PTR(thread->thread);
+
+        if (thread->thread != nullptr)
+        {
+            thread->thread->wait();
+        }
     }
 
     _tanksThread.clear();
+
+    Q_CHECK_PTR(_syncThread->thread);
+    if (_syncThread->thread != nullptr)
+    {
+        _syncThread->thread->wait();
+    }
+    _syncThread.reset(nullptr);
 }

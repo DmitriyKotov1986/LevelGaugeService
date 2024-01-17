@@ -14,6 +14,7 @@
 #include "Common/tdbloger.h"
 #include "tconfig.h"
 #include "tank.h"
+#include "sync.h"
 
 namespace LevelGaugeService
 {
@@ -43,6 +44,15 @@ private:
         std::unique_ptr<QThread> thread;
     };
 
+    struct SyncThread
+    {
+        std::unique_ptr<Sync> sync;
+        std::unique_ptr<QThread> thread;
+    };
+
+private:
+    bool startSync();
+
 private:
     TConfig* _cnf = nullptr;
     Common::TDBLoger* _loger = nullptr;
@@ -50,6 +60,8 @@ private:
     QString _errorString;
 
     std::vector<std::unique_ptr<TankThread>> _tanksThread;  //список конфигураций резервуаров
+
+    std::unique_ptr<SyncThread> _syncThread; //поток синхронизации с БД АО НИТ
 
 };
 

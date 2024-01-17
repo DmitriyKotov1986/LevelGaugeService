@@ -14,6 +14,7 @@ TConfig* TConfig::config(const QString& configFileName)
 {
     if (configPtr == nullptr)
     {
+        Q_ASSERT(!configFileName.isEmpty());
         configPtr = new TConfig(configFileName);
     }
 
@@ -75,6 +76,17 @@ TConfig::TConfig(const QString& configFileName) :
     _dbConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
     ini.endGroup();
 
+    //AO Nit Database
+    ini.beginGroup("NIT_DATABASE");
+    _dbConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
+    _dbConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
+    _dbConnectionInfo.db_UserName = ini.value("UID", "").toString();
+    _dbConnectionInfo.db_Password = ini.value("PWD", "").toString();
+    _dbConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();
+    _dbConnectionInfo.db_Port = ini.value("Port", "").toUInt();
+    _dbConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
+    ini.endGroup();
+
     //System
     ini.beginGroup("SYSTEM");
 
@@ -98,6 +110,49 @@ bool TConfig::save()
         return false;
     }
 
+    ini.clear();
+
+    //Database
+    ini.beginGroup("DATABASE");
+
+    ini.remove("");
+
+    ini.setValue("Driver", _dbConnectionInfo.db_Driver);
+    ini.setValue("DataBase", _dbConnectionInfo.db_DBName);
+    ini.setValue("UID", _dbConnectionInfo.db_UserName);
+    ini.setValue("PWD", _dbConnectionInfo.db_Password);
+    ini.setValue("ConnectionOprions", _dbConnectionInfo.db_ConnectOptions);
+    ini.setValue("Port", _dbConnectionInfo.db_Port);
+    ini.setValue("Host", _dbConnectionInfo.db_Host);
+
+    ini.endGroup();
+
+    //Database
+    ini.beginGroup("NIT_DATABASE");
+
+    ini.remove("");
+
+    ini.setValue("Driver", _dbNitConnectionInfo.db_Driver);
+    ini.setValue("DataBase", _dbNitConnectionInfo.db_DBName);
+    ini.setValue("UID", _dbNitConnectionInfo.db_UserName);
+    ini.setValue("PWD", _dbNitConnectionInfo.db_Password);
+    ini.setValue("ConnectionOprions", _dbNitConnectionInfo.db_ConnectOptions);
+    ini.setValue("Port", _dbNitConnectionInfo.db_Port);
+    ini.setValue("Host", _dbNitConnectionInfo.db_Host);
+
+    ini.endGroup();
+
+    //System
+    ini.beginGroup("SYSTEM");
+
+    ini.remove("");
+
+    ini.setValue("LastSaveID", _sys_lastSaveId);
+    ini.setValue("DebugMode", _sys_DebugMode);
+
+    ini.endGroup();
+
+    //сбрасываем буфер
     ini.sync();
 
     if (_sys_DebugMode)
@@ -106,6 +161,12 @@ bool TConfig::save()
     }
 
     return true;
+}
+
+void TConfig::sys_setLastSaveId(quint64 id)
+{
+    _sys_lastSaveId = id;
+    save();
 }
 
 QString TConfig::errorString()

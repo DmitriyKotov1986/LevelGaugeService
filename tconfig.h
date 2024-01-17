@@ -25,9 +25,13 @@ public:
 
     //[DATABASE]
     const Common::DBConnectionInfo& dbConnectionInfo() const { return _dbConnectionInfo; };
+    //[NIT_DATABASE]
+    const Common::DBConnectionInfo& dbNitConnectionInfo() const { return _dbNitConnectionInfo; };
 
     //[SYSTEM]
     bool sys_DebugMode() const { return _sys_DebugMode; }
+    bool sys_LastSaveId() const { return _sys_lastSaveId; }
+    void sys_setLastSaveId(quint64 id);
 
     //errors
     QString errorString();
@@ -41,8 +45,12 @@ private:
     //[DATABASE]
     Common::DBConnectionInfo _dbConnectionInfo;
 
+    //[NIT_DATABASE]
+    Common::DBConnectionInfo _dbNitConnectionInfo;
+
     //[SYSTEM]
     bool _sys_DebugMode = false;
+    quint64 _sys_lastSaveId = 0;
 
 };
 } //namespace RegService

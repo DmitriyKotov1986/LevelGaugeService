@@ -15,6 +15,7 @@
 
 //My
 #include "Common/Common.h"
+#include "commondefines.h"
 
 namespace LevelGaugeService
 {
@@ -29,27 +30,6 @@ class Tank
     friend TankTest;
 
 public:
-    enum class AdditionFlag: quint8 //флаг способа добавления записи
-    {
-        MEASUMENTS = 0b00000001,  //из таблицы с измерениями
-        CALCULATE  = 0b00000010,  //вычислено данной службой
-        MANUAL     = 0b00000100,  //вручную
-        SERVICE    = 0b00001000,  //Запись не сохранена в БД НИТа из-за проводимого ТО
-        CORRECTED  = 0b00010000,
-        UNKNOWN    = 0b10000000,  //неизвестное состояние
-        UNDEFINE   = 0b00000000
-    };
-
-    struct Status //текущий статус резервуара
-    {
-        float volume = -1.0;  //текущий объем
-        float mass = -1.0;    //текущая масса
-        float density = -1.0; //теккущая плотность
-        float height = -1.0;  //текущий уровень
-        float temp = -273.0;  //текущая температура
-        quint8 flag = static_cast<quint8>(AdditionFlag::UNDEFINE);  //способ добавления записи
-    };
-
     struct Delta //различные дельты
     {
         float volume = 0.0;  //объем
@@ -59,41 +39,49 @@ public:
         float temp = 0.0;    //температура
     };
 
-    struct Limits
+    struct Limits //Предельные значения
     {
         QPair<float, float> volume;  //объем
         QPair<float, float> mass;    //масса
         QPair<float, float> density; //плотность
         QPair<float, float> height;  //уровень
         QPair<float, float> temp;    //температура
-
     };
 
     struct TankConfig //конфигурация резервуара
     {
-        qint64 id = -1;           //ID
-        QString AZSCode = "999";  //код АЗС
-        quint8 tankNumber = 0;    //номер резервуара
-        bool serviceMode = false;
-        QString product = "UD";   //Вид топлива в резервуаре
-        float volume = 0.0;   //Объем резервуара
-        float diametr = 0.0;  //Диаметр резервуара
-        QString dbNitName;    //имя БД НИТа куда нужно сохранять результаты
-        qint64 timeShift = 0; //смещение времени на АЗС относительно сервера в секундах
+        TankID id;
+
+        float totalVolume = 0.0;   //Объем резервуара
+        float diametr = 0.0;      //Диаметр резервуара
+        QString dbNitName;        //имя БД НИТа куда нужно сохранять результаты
+        qint64 timeShift = 0;     //смещение времени на АЗС относительно сервера в секундах
+        Limits _limits;           //Пределы значений
+
+        Delta deltaMax;     //максимально допустимое изменение параметров резервуара за 1 минуту при нормальной работе
+        Delta deltaIntake;  //максимально допустимое изменение параметров резервуара за 1 минуту при приеме топлива
+
+        float deltaIntakeHeight = 0.0; //пороговое значение изменения уровня топлива за 10 минут с котого считаем что произошел прием
+
         QDateTime lastIntake = QDateTime::currentDateTime();     //время последненего прихода (время АЗС)
         QDateTime lastMeasuments = QDateTime::currentDateTime(); //время последней загруженной записи из БД Измерений
         QDateTime lastSave = QDateTime::currentDateTime();       //время последней сохраненной записи (время АЗС)
-        QDateTime lastCheck = QDateTime::currentDateTime();      //время последней проверенной записи (время АЗС)
     };
 
 private:
-    using TankStatus = std::map<QDateTime, std::unique_ptr<Status>>;
-    using TankStatusIterator = Tank::TankStatus::iterator;
+    using TankStatusIterator = TankStatus::iterator;
+
+private:
+    static QString additionFlagToString(quint8 flag);
 
 public:   
     Tank() = delete;
+    Tank(const Tank&) = delete;
+    Tank& operator =(const Tank&) = delete;
+    Tank(const Tank&&) = delete;
+    Tank& operator =(const Tank&&) = delete;
 
-    explicit Tank(qint64 tankID, const Common::DBConnectionInfo& dbConnectionInfo, QObject *parent = nullptr);
+    explicit Tank(const TankID& id, const Common::DBConnectionInfo& dbConnectionInfo, QObject *parent = nullptr);
     ~Tank();
 
 public slots:
@@ -119,19 +107,12 @@ private:
     void makeLimits();
     void initFromSave();        //загружает данне о предыдыщих сохранениях из БД
     void loadFromMeasument();   //загружает новые данные из таблицы измерений
-    void checkStatus();         //проверяет порядок статусов и добавляет их, если необходимо
-    void checkLimits();
-    TankStatusIterator addStatusRange(TankStatusIterator start, TankStatusIterator finish);
-    TankStatusIterator addStatusIntake(TankStatusIterator start, TankStatusIterator finish);
-    void addStatusEnd(const QDateTime& finish);
-    TankStatusIterator addStatusStart(const QDateTime& start);
+    void makeResultStatus();         //
+    void checkLimits(TankStatusIterator start_it);         //провеверяет лимитные ограничения статусов
+    void addStatusRange(const QDateTime& targetDateTime, const Status& targetStatus);
+    void addStatusIntake(const Status& targetStatus);
+    void addStatusEnd();
     void addRandom(TankStatusIterator it);
-    void saveToNitDB();         //сохраняет данные в БД НИТа
-    void saveIntake();          //Находит и сохраняет приходы
-    TankStatusIterator getStartIntake();    //возвращает итератор на начало приема топлива
-    TankStatusIterator getFinishedIntake(); //возвращает итератор на конец приема топлива
-
-    TankStatusIterator insertTankStatus(const QDateTime dateTime, const Status& status);
 
 private:
     const Common::DBConnectionInfo _dbConnectionInfo;
@@ -139,8 +120,8 @@ private:
     QString _dbConnectionName;
 
     TankConfig _tankConfig; //Конфигурация резервуар
-    TankStatus _tankStatus; //карта состояний
-    Limits _limits;
+    TankStatus _tankResultStatus; //карта результирующих состояний
+    TankStatus _tankTargetStatus; //карта целевых состояний
 
     QTimer* _timer = nullptr;
 
