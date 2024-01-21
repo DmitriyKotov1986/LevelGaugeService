@@ -1,21 +1,83 @@
+//My
+#include "Common/common.h"
+
 #include "intake.h"
+
+using namespace LevelGaugeService;
+using namespace Common;
+
+static const QString CONNECTION_TO_DB_NAME = "Intake";
+static const QString CONNECTION_TO_DB_NIT_NAME = "IntakeNIT";
 
 Intake::Intake(QObject *parent)
     : QObject{parent}
+    , _cnf(TConfig::config())
 {
-
+    Q_CHECK_PTR(_cnf);
 }
 
-Intake::TankStatusIterator Intake::getStartIntake()
+Intake::~Intake()
 {
-    auto startTankStatus_it = _tankResultStatus.upper_bound(_tankConfig.lastIntake);
-    if (std::distance(startTankStatus_it, _tankResultStatus.end()) <= MIN_STEP_COUNT_START_INTAKE)
+    stop();
+}
+
+void Intake::start()
+{
+    if (!connectToDB(_db, _cnf->dbConnectionInfo(), CONNECTION_TO_DB_NAME))
     {
-        return _tankResultStatus.end();
+        emit errorOccurred(connectDBErrorString(_db));
+
+        return;
+    }
+
+    if (!connectToDB(_dbNit, _cnf->dbNitConnectionInfo(), CONNECTION_TO_DB_NIT_NAME))
+    {
+        _db.close();
+
+        emit errorOccurred(connectDBErrorString(_db));
+
+        return;
+    }
+
+    Q_ASSERT(_timer == nullptr);
+    _timer = new QTimer();
+
+    QObject::connect(_timer, SIGNAL(timeout()), SLOT(sync()));
+
+    _timer->start(600000);
+}
+
+void Intake::stop()
+{
+    delete _timer;
+    _timer = nullptr;
+
+    if (_db.isOpen())
+    {
+        _db.close();
+    }
+    if (_dbNit.isOpen())
+    {
+        _dbNit.close();
+    }
+
+    QSqlDatabase::removeDatabase(CONNECTION_TO_DB_NAME);
+    QSqlDatabase::removeDatabase(CONNECTION_TO_DB_NIT_NAME);
+
+    emit finished();
+}
+
+
+TankStatuses::TankStatusesIterator Intake::getStartIntake()
+{
+    auto startTankStatus_it = _tankStatuses.upperBound(_tankStatuses.lastIntake);
+    if (std::distance(startTankStatus_it, _tankStatuses.end()) <= MIN_STEP_COUNT_START_INTAKE)
+    {
+        return _tankStatuses.end();
     }
 
     for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT_START_INTAKE);
-         finishTankStatus_it != _tankResultStatus.end();
+         finishTankStatus_it != _tankStatuses.end();
          ++finishTankStatus_it)
     {
         if (finishTankStatus_it->second->volume - startTankStatus_it->second->volume >= DELTA_INTAKE_VOLUME)
@@ -25,19 +87,19 @@ Intake::TankStatusIterator Intake::getStartIntake()
 
         ++startTankStatus_it;
     }
-    return _tankResultStatus.end();
+    return _tankStatuses.end();
 }
 
-Intake::Tank::TankStatusIterator Intake::getFinishedIntake()
+TankStatusesIterator Intake::getFinishedIntake()
 {
-    auto startTankStatus_it = _tankResultStatus.upper_bound(_tankConfig.lastIntake);
-    if (std::distance(startTankStatus_it, _tankResultStatus.end()) <= MIN_STEP_COUNT_FINISH_INTAKE)
+    auto startTankStatus_it = _tankStatuses.upperBound(_tankStatuses.lastIntake);
+    if (std::distance(startTankStatus_it, _tankStatuses.end()) <= MIN_STEP_COUNT_FINISH_INTAKE)
     {
-        return _tankResultStatus.end();
+        return _tankStatuses.end();
     }
 
     for (auto finishTankStatus_it = std::next(startTankStatus_it, MIN_STEP_COUNT_FINISH_INTAKE);
-         finishTankStatus_it != _tankResultStatus.end();
+         finishTankStatus_it != _tankStatuses.end();
          ++finishTankStatus_it)
     {
         if (finishTankStatus_it->second->volume - startTankStatus_it->second->volume <= 0.0)
@@ -47,10 +109,10 @@ Intake::Tank::TankStatusIterator Intake::getFinishedIntake()
 
         ++startTankStatus_it;
     }
-    return _tankResultStatus.end();
+    return _tankStatuses.end();
 }
 
-void Tank::saveIntake()
+void Intake::saveIntake()
 {
     auto start_it = Tank::getStartIntake();
     if (start_it == _tankResultStatus.end())
@@ -88,7 +150,7 @@ void Tank::saveIntake()
         dbQueryExecute(queryText);
     }
 
-    quint8 flag = static_cast<quint8>(AdditionFlag::UNKNOWN);
+    quint8 flag = static_cast<quint8>(TankStatuses::AdditionFlag::UNKNOWN);
     for (auto it = start_it; it != finish_it; it ++)
     {
          flag = flag | static_cast<quint8>(it->second->flag);

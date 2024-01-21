@@ -1,3 +1,6 @@
+//My
+#include "Common/common.h"
+
 #include "sync.h"
 
 using namespace LevelGaugeService;
@@ -36,6 +39,7 @@ void Sync::start()
         return;
     }
 
+    Q_ASSERT(_timer == nullptr);
     _timer = new QTimer();
 
     QObject::connect(_timer, SIGNAL(timeout()), SLOT(sync()));
@@ -46,6 +50,7 @@ void Sync::start()
 void Sync::stop()
 {
     delete _timer;
+    _timer = nullptr;
 
     if (_db.isOpen())
     {
@@ -62,9 +67,9 @@ void Sync::stop()
     emit finished();
 }
 
-void Sync::addStatusForSync(const TankID &id, const QDateTime dateTime, const Status &status)
+void Sync::addStatusForSync(const TankID &id, const QDateTime dateTime, const TankStatus &tankStatus)
 {
-    StatusData tmp{id, dateTime, status};
+    StatusData tmp{id, dateTime, tankStatus};
 
     _statusesData.push(std::move(tmp));
 }
@@ -129,22 +134,35 @@ void Sync::saveToDB(const StatusData& statusData, const TankID& id, const TankCo
             .arg(id.levelGaugeCode)
             .arg(id.tankNumber)
             .arg(statusData.dateTime.addSecs(tankConfig.timeShift).toString(DATETIME_FORMAT))  //переводим время на время АЗС
-            .arg(statusData.status.volume / 1000.0, 0, 'f', 0) //переводим объем в м3
-            .arg(tankConfig.TotalVolume / 1000.0, 0, 'f', 0)   //переводим объем в м3
-            .arg(statusData.status.mass, 0, 'f', 0)
-            .arg(statusData.status.density, 0, 'f', 1)
-            .arg(statusData.status.height / 10.0, 0, 'f', 1)   //высоту переводм в см
-            .arg(statusData.status.temp, 0, 'f', 1)
+            .arg(statusData.tankStatus.volume / 1000.0, 0, 'f', 0) //переводим объем в м3
+            .arg(tankConfig.totalVolume / 1000.0, 0, 'f', 0)   //переводим объем в м3
+            .arg(statusData.tankStatus.mass, 0, 'f', 0)
+            .arg(statusData.tankStatus.density, 0, 'f', 1)
+            .arg(statusData.tankStatus.height / 10.0, 0, 'f', 1)   //высоту переводм в см
+            .arg(statusData.tankStatus.temp, 0, 'f', 1)
             .arg(tankConfig.product)
             .arg(static_cast<quint8>(tankConfig.productStatus))
             .arg(tankConfig.tankName)
             .arg(recordID)
             .arg(tankConfig.dbNitName)
-            .arg(static_cast<quint8>(tankConfig.tankType))
-            .arg(static_cast<quint8>(statusData.status.flag))
-            .arg(static_cast<quint8>(statusData.status.tankStatus))
+            .arg(static_cast<quint8>(tankConfig.type))
+            .arg(static_cast<quint8>(statusData.tankStatus.flag))
+            .arg(static_cast<quint8>(statusData.tankStatus.status))
             .arg(static_cast<quint8>(tankConfig.mode))
             .arg(QDateTime::currentDateTime().toString(DATETIME_FORMAT));
+
+    executeDBQuery(_db, queryText);
+}
+
+void Sync::saveLastDateTime(const StatusData &statusData, const TankID &id, const TankConfig& tankConfig) const
+{
+    const auto queryText =
+        QString("UPDATE [dbo].[TanksInfo] "
+                "SET [LastSaveDateTime] = CAST('%1' AS DATETIME2) "
+                "WHERE [AZSCode] = '%2' AND [TankNumber] = %3 ")
+            .arg(statusData.dateTime.addSecs(tankConfig.timeShift).toString(DATETIME_FORMAT))  //переводим время на время АЗС
+            .arg(id.levelGaugeCode)
+            .arg(id.tankNumber);
 
     executeDBQuery(_db, queryText);
 }
@@ -165,16 +183,16 @@ void Sync::saveToDBNitOilDepot(const StatusData& statusData, const TankID& id, c
             .arg(id.levelGaugeCode)
             .arg(id.tankNumber)
             .arg(tankConfig.tankName)
-            .arg(static_cast<quint8>(tankConfig.tankType))
+            .arg(static_cast<quint8>(tankConfig.type))
             .arg(static_cast<quint8>(tankConfig.mode))
             .arg(tankConfig.product)
             .arg(static_cast<quint8>(tankConfig.productStatus))
-            .arg(statusData.status.height / 10.0, 0, 'f', 1)   //высоту переводм в см
-            .arg(statusData.status.volume / 1000.0, 0, 'f', 0) //переводим объем в м3
-            .arg(tankConfig.TotalVolume / 1000.0, 0, 'f', 0)   //переводим объем в м3
-            .arg(statusData.status.temp, 0, 'f', 1)
-            .arg(statusData.status.density, 0, 'f', 1)
-            .arg(statusData.status.mass, 0, 'f', 0);
+            .arg(statusData.tankStatus.height / 10.0, 0, 'f', 1)   //высоту переводм в см
+            .arg(statusData.tankStatus.volume / 1000.0, 0, 'f', 0) //переводим объем в м3
+            .arg(tankConfig.totalVolume / 1000.0, 0, 'f', 0)   //переводим объем в м3
+            .arg(statusData.tankStatus.temp, 0, 'f', 1)
+            .arg(statusData.tankStatus.density, 0, 'f', 1)
+            .arg(statusData.tankStatus.mass, 0, 'f', 0);
 
     executeDBQuery(_dbNit, queryText);
 }
@@ -191,11 +209,11 @@ void Sync::saveToDBNitAZS(const StatusData &statusData, const TankID &id, const 
             .arg(id.levelGaugeCode)
             .arg(id.tankNumber)
             .arg(tankConfig.product)
-            .arg(statusData.status.height / 10.0, 0, 'f', 1)  //высоту переводм в см
-            .arg(statusData.status.volume, 0, 'f', 0)
-            .arg(statusData.status.temp, 0, 'f', 1)
-            .arg(statusData.status.density, 0, 'f', 1)
-            .arg(statusData.status.mass, 0, 'f', 0);
+            .arg(statusData.tankStatus.height / 10.0, 0, 'f', 1)  //высоту переводм в см
+            .arg(statusData.tankStatus.volume, 0, 'f', 0)
+            .arg(statusData.tankStatus.temp, 0, 'f', 1)
+            .arg(statusData.tankStatus.density, 0, 'f', 1)
+            .arg(statusData.tankStatus.mass, 0, 'f', 0);
 
     executeDBQuery(_dbNit, queryText);
 }

@@ -25,8 +25,13 @@ class Core
     Q_OBJECT
 
 public:
+    Core(const Core&) = delete;
+    Core& operator =(const Core&) = delete;
+    Core(const Core&&) = delete;
+    Core& operator =(const Core&&) = delete;
+
     explicit Core(QObject *parent = nullptr);
-   ~Core();
+    ~Core();
 
     void start();
     void stop();

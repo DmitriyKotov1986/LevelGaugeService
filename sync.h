@@ -19,6 +19,7 @@
 //My
 #include "tconfig.h"
 #include "commondefines.h"
+#include "tankstatuses.h"
 
 namespace LevelGaugeService
 {
@@ -36,7 +37,7 @@ private:
         UNDEFINE = 0    //неопределено
     };
 
-    enum class TankType: quint8  //Вид резервуара
+    enum class Type: quint8  //Вид резервуара
     {
         HORIZONTAL = 1,  //РГС
         VERTICAL = 2,    //РВС
@@ -55,10 +56,10 @@ private:
         QString dbNitName;
         qint64 timeShift = 0;
         Mode mode = Mode::UNDEFINE;  //Режим работы резервуара
-        TankType tankType = TankType::UNDEFINE;  //Вид резервуара
+        Type type = Type::UNDEFINE;  //Вид резервуара
         QString product = "UD";
         ProductStatus productStatus = ProductStatus::UNPASPORT; //Статус НП (нефтепродуктов)
-        float TotalVolume  = 0.0;
+        float totalVolume  = 0.0;
     };
 
     using TanksConfig = QHash<TankID, TankConfig>;
@@ -67,17 +68,22 @@ private:
     {
         TankID id;
         QDateTime dateTime;
-        Status status;
+        TankStatuses::TankStatus tankStatus;
     };
 
 public:
+    Sync(const Sync&) = delete;
+    Sync& operator =(const Sync&) = delete;
+    Sync(const Sync&&) = delete;
+    Sync& operator =(const Sync&&) = delete;
+
     explicit Sync(QObject *parent = nullptr);
     ~Sync();
 
 public slots:
     void start();
     void stop();
-    void addStatusForSync(const TankID& id,const QDateTime dateTime, const Status& status);
+    void addStatusForSync(const LevelGaugeService::TankID& id,const QDateTime dateTime, const TankStatuses::TankStatus& tankStatus);
 
 private slots:
     void sync();
@@ -88,6 +94,7 @@ signals:
 
 private:
     void saveToDB(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig, quint64 recordID) const;
+    void saveLastDateTime(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
     void saveToDBNitOilDepot(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
     void saveToDBNitAZS(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
     quint64 getLastSavetId(const TankConfig& tankConfig) const;
@@ -98,8 +105,8 @@ private:
 
     QTimer *_timer = nullptr;
 
-    mutable QSqlDatabase _db;   //база данных с исходными данными
-    mutable QSqlDatabase _dbNit;   //база данных с исходными данными
+    mutable QSqlDatabase _db;      //база данных с исходными данными
+    mutable QSqlDatabase _dbNit;   //база данных АО НИТ
 
     TanksConfig _tanksConfig;
 

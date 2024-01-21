@@ -16,6 +16,7 @@
 //My
 #include "Common/Common.h"
 #include "commondefines.h"
+#include "tankstatuses.h"
 
 namespace LevelGaugeService
 {
@@ -30,23 +31,7 @@ class Tank
     friend TankTest;
 
 public:
-    struct Delta //различные дельты
-    {
-        float volume = 0.0;  //объем
-        float mass = 0.0;    //масса
-        float density = 0.0; //плотность
-        float height = 0.0;  //уровень
-        float temp = 0.0;    //температура
-    };
 
-    struct Limits //Предельные значения
-    {
-        QPair<float, float> volume;  //объем
-        QPair<float, float> mass;    //масса
-        QPair<float, float> density; //плотность
-        QPair<float, float> height;  //уровень
-        QPair<float, float> temp;    //температура
-    };
 
     struct TankConfig //конфигурация резервуара
     {
@@ -54,22 +39,18 @@ public:
 
         float totalVolume = 0.0;   //Объем резервуара
         float diametr = 0.0;      //Диаметр резервуара
-        QString dbNitName;        //имя БД НИТа куда нужно сохранять результаты
         qint64 timeShift = 0;     //смещение времени на АЗС относительно сервера в секундах
-        Limits _limits;           //Пределы значений
+
+        Limits limits;           //Пределы значений
 
         Delta deltaMax;     //максимально допустимое изменение параметров резервуара за 1 минуту при нормальной работе
         Delta deltaIntake;  //максимально допустимое изменение параметров резервуара за 1 минуту при приеме топлива
 
         float deltaIntakeHeight = 0.0; //пороговое значение изменения уровня топлива за 10 минут с котого считаем что произошел прием
 
-        QDateTime lastIntake = QDateTime::currentDateTime();     //время последненего прихода (время АЗС)
         QDateTime lastMeasuments = QDateTime::currentDateTime(); //время последней загруженной записи из БД Измерений
         QDateTime lastSave = QDateTime::currentDateTime();       //время последней сохраненной записи (время АЗС)
     };
-
-private:
-    using TankStatusIterator = TankStatus::iterator;
 
 private:
     static QString additionFlagToString(quint8 flag);
@@ -92,36 +73,37 @@ private slots:
     void calculate();
 
 signals:
-    void sendLogMsg(int category, const QString& msg);
+    void addStatusForSync(const LevelGaugeService::TankID& id,const QDateTime dateTime, const TankStatuses::TankStatus& status) const;
     void errorOccurred(const QString& msg);
     void finished();
 
 private:
-    bool connectToDB();
-    void dbQueryExecute(const QString &queryText);
-    void dbQueryExecute(QSqlQuery& query, const QString &queryText);
     void dbCommit();
     void errorDBQuery(const QSqlQuery& query);
+    void dbQueryExecute(QSqlQuery &query, const QString &queryText);
 
     void loadTankConfig();
-    void makeLimits();
+
     void initFromSave();        //загружает данне о предыдыщих сохранениях из БД
     void loadFromMeasument();   //загружает новые данные из таблицы измерений
     void makeResultStatus();         //
-    void checkLimits(TankStatusIterator start_it);         //провеверяет лимитные ограничения статусов
-    void addStatusRange(const QDateTime& targetDateTime, const Status& targetStatus);
-    void addStatusIntake(const Status& targetStatus);
+    void statusDetect();
+    void checkLimits(TankStatuses::TankStatusesIterator start_it);         //провеверяет лимитные ограничения статусов
+    void addStatusRange(const QDateTime& targetDateTime, const TankStatuses::TankStatus& targetStatus);
+    void addStatusIntake(const TankStatuses::TankStatus& targetStatus);
     void addStatusEnd();
-    void addRandom(TankStatusIterator it);
+    void addRandom(TankStatuses::TankStatusesIterator it);
+    void sendNewStatuses();
+    void clearTankStatus();
 
 private:
-    const Common::DBConnectionInfo _dbConnectionInfo;
-    QSqlDatabase _db;   //база данных с исходными данными
-    QString _dbConnectionName;
-
     TankConfig _tankConfig; //Конфигурация резервуар
-    TankStatus _tankResultStatus; //карта результирующих состояний
-    TankStatus _tankTargetStatus; //карта целевых состояний
+    TankStatuses _tankResultStatuses; //карта результирующих состояний
+    TankStatuses _tankTargetStatuses; //карта целевых состояний
+
+    QSqlDatabase _db;
+    const Common::DBConnectionInfo _dbConnectionInfo;
+    const QString _dbConnectionName;
 
     QTimer* _timer = nullptr;
 

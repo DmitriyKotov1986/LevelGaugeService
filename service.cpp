@@ -32,7 +32,10 @@ Service::Service(int argc, char **argv)
     logdb.setPort(dbConnectionInfo.db_Port);
     logdb.setHostName(dbConnectionInfo.db_Host);
 
-    _loger = Common::TDBLoger::DBLoger(&logdb, _cnf->sys_DebugMode(), "LevelGaugeServiceLog");
+    _loger = Common::TDBLoger::DBLoger(_cnf->dbConnectionInfo(), "LevelGaugeServiceLog", _cnf->sys_DebugMode());
+    _loger->start();
+
+
     if (_loger->isError())
     {
         QString msg = QString("Loger initialization error. Error: %1").arg(_loger->errorString());

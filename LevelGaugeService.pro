@@ -1,7 +1,8 @@
 QT -= gui
 QT += sql
+QT += network
 
-CONFIG += c++11 console
+CONFIG += c++20 console
 CONFIG -= app_bundle
 
 # You can make your code fail to compile if it uses deprecated APIs.
@@ -10,6 +11,9 @@ CONFIG -= app_bundle
 
 INCLUDEPATH += $$PWD/../../../Common/Headers
 INCLUDEPATH += $$PWD/../../../QtService/Headers
+
+DEPENDPATH += $$PWD/../../../Common/Headers
+DEPENDPATH += $$PWD/../../../QtService/Headers
 
 LIBS+= -L$$PWD/../../../Common/Lib -lCommon
 LIBS+= -L$$PWD/../../../QtService/Lib -lQtService
@@ -21,6 +25,9 @@ SOURCES += \
         service.cpp \
         sync.cpp \
         tank.cpp \
+    tankconfig.cpp \
+    tankid.cpp \
+    tankstatuses.cpp \
         tconfig.cpp \
 
 # Default rules for deployment.
@@ -35,9 +42,14 @@ HEADERS += \
     service.h \
     sync.h \
     tank.h \
+    tankconfig.h \
+    tankid.h \
+    tankstatuses.h \
     tconfig.h
 
 DISTFILES += \
     ReadMe.txt \
 
 RC_ICONS = $$PWD/res/LevelGaugeService.ico
+
+
