@@ -3,7 +3,6 @@
 
 //QT
 #include <QString>
-#include <QStringList>
 
 #include "Common/common.h"
 
@@ -30,8 +29,6 @@ public:
 
     //[SYSTEM]
     bool sys_DebugMode() const { return _sys_DebugMode; }
-    bool sys_LastSaveId() const { return _sys_lastSaveId; }
-    void sys_setLastSaveId(quint64 id);
 
     //errors
     QString errorString();
@@ -50,7 +47,6 @@ private:
 
     //[SYSTEM]
     bool _sys_DebugMode = false;
-    quint64 _sys_lastSaveId = 0;
 
 };
 } //namespace RegService

@@ -18,8 +18,9 @@
 
 //My
 #include "tconfig.h"
-#include "commondefines.h"
 #include "tankstatuses.h"
+#include "tanksconfig.h"
+#include "intake.h"
 
 namespace LevelGaugeService
 {
@@ -29,88 +30,49 @@ class Sync final
 {
     Q_OBJECT
 
-private:
-    enum class Mode: quint8  //Режим работы резервуара
-    {
-        AZS = 1,        //АЗС
-        OIL_DEPOT = 2,  //Нефтебаза
-        UNDEFINE = 0    //неопределено
-    };
-
-    enum class Type: quint8  //Вид резервуара
-    {
-        HORIZONTAL = 1,  //РГС
-        VERTICAL = 2,    //РВС
-        UNDEFINE = 0     //неопределено
-    };
-
-    enum class ProductStatus //Статус НП (нефтепродуктов)
-    {
-        UNPASPORT = 0, //непаспортизированный
-        PASPORT = 1    //паспортизированный
-    };
-
-    struct TankConfig
-    {
-        QString tankName = "n/a";     //Внутренее наименование резервуара
-        QString dbNitName;
-        qint64 timeShift = 0;
-        Mode mode = Mode::UNDEFINE;  //Режим работы резервуара
-        Type type = Type::UNDEFINE;  //Вид резервуара
-        QString product = "UD";
-        ProductStatus productStatus = ProductStatus::UNPASPORT; //Статус НП (нефтепродуктов)
-        float totalVolume  = 0.0;
-    };
-
-    using TanksConfig = QHash<TankID, TankConfig>;
-
-    struct StatusData
-    {
-        TankID id;
-        QDateTime dateTime;
-        TankStatuses::TankStatus tankStatus;
-    };
-
 public:
+    Sync() = delete;
+
     Sync(const Sync&) = delete;
     Sync& operator =(const Sync&) = delete;
     Sync(const Sync&&) = delete;
     Sync& operator =(const Sync&&) = delete;
 
-    explicit Sync(QObject *parent = nullptr);
+    Sync(const Common::DBConnectionInfo& dbConnectionInfo, const Common::DBConnectionInfo& dbNitConnectionInfo,
+         LevelGaugeService::TanksConfig* tanksConfig, QObject *parent = nullptr);
+
     ~Sync();
 
 public slots:
+    void newStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void newIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+
     void start();
     void stop();
-    void addStatusForSync(const LevelGaugeService::TankID& id,const QDateTime dateTime, const TankStatuses::TankStatus& tankStatus);
-
-private slots:
-    void sync();
 
 signals:
-    void errorOccurred(const QString& msg) const;
+    void errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString);
     void finished() const;
 
 private:
-    void saveToDB(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig, quint64 recordID) const;
-    void saveLastDateTime(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
-    void saveToDBNitOilDepot(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
-    void saveToDBNitAZS(const StatusData& statusData, const TankID& id, const TankConfig& tankConfig) const;
-    quint64 getLastSavetId(const TankConfig& tankConfig) const;
-    void executeDBQuery(QSqlDatabase& db, const QString& queryText) const;
+    void saveToDB(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatus& tankStatus, quint64 recordID);
+    void saveToDBNitOilDepot(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatus& tankStatus);
+    void saveToDBNitAZS(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatus& tankStatus);
+
+    quint64 getLastSavetId(const LevelGaugeService::TankID& id);
+
+    void saveIntakesToNIT(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+    void saveIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+
+    void executeDBQuery(QSqlDatabase& db, const QString& queryText);
 
 private:
-    const TConfig *_cnf = nullptr;
+    TanksConfig* _tanksConfig = nullptr;
+    const Common::DBConnectionInfo _dbConnectionInfo;
+    const Common::DBConnectionInfo _dbNitConnectionInfo;
 
-    QTimer *_timer = nullptr;
-
-    mutable QSqlDatabase _db;      //база данных с исходными данными
-    mutable QSqlDatabase _dbNit;   //база данных АО НИТ
-
-    TanksConfig _tanksConfig;
-
-    std::queue<StatusData> _statusesData;
+    QSqlDatabase _db;      //база данных с исходными данными
+    QSqlDatabase _dbNit;   //база данных АО НИТ
 
 }; //class Sync
 

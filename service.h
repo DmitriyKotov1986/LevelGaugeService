@@ -3,9 +3,10 @@
 
 //Qt
 #include <QString>
+#include <QObject>
 
 //My
-#include <QtService/qtservice.h>
+#include <QtService/QtService>
 #include "Common/tdbloger.h"
 #include "tconfig.h"
 #include "core.h"
@@ -13,15 +14,28 @@
 namespace LevelGaugeService
 {
 
-class Service
-    : public QtService::QtService<QCoreApplication>
+class Service final
+    : public QObject
+    , public QtService<QCoreApplication>
 {
+    Q_OBJECT
+
 public:
-   explicit Service(int argc, char **argv);
-   ~Service();
+    Service() = delete;
+    Service(const Service&) = delete;
+    Service& operator=(const Service&) = delete;
+    Service(Service&&) = delete;
+    Service& operator=(Service&&) = delete;
+
+    explicit Service(int argc, char **argv);
+    ~Service();
 
     QString errorString();
     bool isError() const { return !_errorString.isEmpty(); }
+
+public slots:
+    void errorOccurredLoger(Common::EXIT_CODE errorCode, const QString &errorString);
+    void errorOccurredCore(Common::EXIT_CODE errorCode, const QString &errorString);
 
 protected:
     virtual void start() override;  //Запус сервиса

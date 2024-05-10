@@ -5,10 +5,7 @@
 
 //My
 #include "common/common.h"
-#include "commondefines.h"
-
 #include "core.h"
-
 
 using namespace LevelGaugeService;
 using namespace Common;
@@ -26,125 +23,100 @@ Core::Core(QObject *parent)
 
 Core::~Core()
 {
-    Q_ASSERT(_tanksThread.size() != 0);
-}
-
-QString Core::errorString()
-{
-    auto res = _errorString;
-    _errorString.clear();
-
-    return res;
 }
 
 bool Core::startSync()
 {
-    auto syncThread = std::make_unique<SyncThread>();
-    syncThread->sync = std::make_unique<Sync>();
-    syncThread->thread = std::make_unique<QThread>();
-    syncThread->sync->moveToThread(syncThread->thread.get());
+    Q_CHECK_PTR(_tanksConfig);
 
-    //запускаем обработку стазу после создания потока
-    QObject::connect(syncThread->thread.get(), SIGNAL(started()), syncThread->sync.get(), SLOT(start()), Qt::QueuedConnection);
+    _sync = std::make_unique<SyncThread>();
 
-    //тормозим поток при отключении сервера
-    QObject::connect(this, SIGNAL(stopAll()), syncThread->sync.get(), SLOT(stop()), Qt::QueuedConnection);
+    _sync->sync = std::make_unique<Sync>(_cnf->dbConnectionInfo(), _cnf->dbNitConnectionInfo(), _tanksConfig.get());
+    _sync->thread = std::make_unique<QThread>();
 
-    //ставим поток на удаление когда он сам завершился
-    QObject::connect(syncThread->sync.get(), SIGNAL(finished()), syncThread->thread.get(), SLOT(quit()));
+    _sync->sync->moveToThread(_sync->thread.get());
 
-    //запускаем поток на выполнение
-    syncThread->thread->start(QThread::NormalPriority);
+    QObject::connect(_sync->thread.get(), SIGNAL(started()), _sync->sync.get(), SLOT(start()), Qt::DirectConnection);
+    QObject::connect(_sync->sync.get(), SIGNAL(finished()), _sync->thread.get(), SLOT(quit()), Qt::DirectConnection);
+
+    QObject::connect(this, SIGNAL(stopAll), _sync->sync.get(), SLOT(stop()), Qt::QueuedConnection);
+
+    QObject::connect(_sync->sync.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
+                     SLOT(errorOccurredSync(Common::EXIT_CODE errorCode, const QString& errorString)), Qt::QueuedConnection);
+    QObject::connect(_sync->sync.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)), Qt::QueuedConnection);
+
+    _sync->thread->start();
+
+    return true;
+}
+
+bool Core::startTankConfig()
+{
+    Q_CHECK_PTR(_loger);
+    Q_ASSERT(_tanksConfig == nullptr);
+
+    _tanksConfig = std::make_unique<TanksConfig>(_cnf->dbConnectionInfo());
+
+    QObject::connect(_tanksConfig.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
+                     SLOT(errorOccurredTankConfig(Common::EXIT_CODE errorCode, const QString& errorString)));
+    QObject::connect(_tanksConfig.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)));
+
+    return _tanksConfig->loadFromDB();
+}
+
+bool Core::startTanks()
+{
+    Q_CHECK_PTR(_tanksConfig);
+    Q_CHECK_PTR(_sync);
+
+    _tanks = std::make_unique<TanksThread>();
+
+    _tanks->tanks = std::make_unique<Tanks>(_cnf->dbConnectionInfo(), _tanksConfig.get());
+    _tanks->thread = std::make_unique<QThread>();
+
+    _tanks->tanks->moveToThread(_tanks->thread.get());
+
+    QObject::connect(_tanks->thread.get(), SIGNAL(started()), _tanks->tanks.get(), SLOT(start()), Qt::DirectConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(finished()), _tanks->thread.get(), SLOT(quit()), Qt::DirectConnection);
+
+    QObject::connect(this, SIGNAL(stopAll), _tanks->tanks.get(), SLOT(stop()), Qt::QueuedConnection);
+
+    QObject::connect(_tanks->tanks.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
+                     SLOT(errorOccurredTanks(Common::EXIT_CODE errorCode, const QString& errorString)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)), Qt::QueuedConnection);
+
+    QObject::connect(_tanks->tanks.get(), SIGNAL(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
+                     _sync->sync.get(), SLOT(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(newIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)),
+                     _sync->sync.get(), SLOT(newIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)), Qt::QueuedConnection);
+
+    _tanks->thread->start();
 
     return true;
 }
 
 void Core::start()
 {
-    //настраиваем подключение БД
-    QSqlDatabase db;
-
-    const auto& dbConnectionInfo = _cnf->dbConnectionInfo();
-    db = QSqlDatabase::addDatabase(dbConnectionInfo.db_Driver, CORE_CONNECTION_TO_DB_NAME);
-    db.setDatabaseName(dbConnectionInfo.db_DBName);
-    db.setUserName(dbConnectionInfo.db_UserName);
-    db.setPassword(dbConnectionInfo.db_Password);
-    db.setConnectOptions(dbConnectionInfo.db_ConnectOptions);
-    db.setPort(dbConnectionInfo.db_Port);
-    db.setHostName(dbConnectionInfo.db_Host);
-
-    //подключаемся к БД
-    if (!db.open())
-    {
-        _errorString = connectDBErrorString(db);
-        QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
-
-        return;
-    };
-
     //загружаем конфигурацию
-    db.transaction();
-    QSqlQuery query(db);
-    query.setForwardOnly(true);
-
-    //загружаем данные об АЗС
-    const auto queryText =
-            QString("SELECT [AZSCode], [TankNumber] "
-                    "FROM [TanksInfo] "
-                    "WHERE A.[Enabled] <> 0");
-
-    if (!query.exec(queryText))
+    if (!startTankConfig())
     {
-        _errorString = executeDBErrorString(db, query);
-
-        db.rollback();
-        db.close();
-        QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
-
+        // в случае ошибки нам прилетит errorOccurredTankConfig(...)
         return;
     }
-
-    while (query.next())
-    {
-        TankID id{query.value("AZSCode").toString(), static_cast<quint8>(query.value("TankNumber").toUInt())};
-        auto tankThread = std::make_unique<TankThread>(); //tank удалиться при остановке потока
-        tankThread->tank = std::make_unique<Tank>(id, dbConnectionInfo);
-        tankThread->thread =  std::make_unique<QThread>();
-        tankThread->tank->moveToThread(tankThread->thread.get());
-
-        //запускаем обработку стазу после создания потока
-        QObject::connect(tankThread->thread.get(), SIGNAL(started()), tankThread->tank.get(), SLOT(start()), Qt::QueuedConnection);
-
-        //тормозим поток при отключении сервера
-        QObject::connect(this, SIGNAL(stopAll()), tankThread->tank.get(), SLOT(stop()), Qt::QueuedConnection);
-
-        //ставим поток на удаление когда он сам завершился
-        QObject::connect(tankThread->tank.get(), SIGNAL(finished()), tankThread->thread.get(), SLOT(quit()));
-
-        //запускаем поток на выполнение
-        tankThread->thread->start(QThread::NormalPriority);
-
-        _tanksThread.push_back(std::move(tankThread));
-    }
-
-    if (!db.commit())
-    {
-        _errorString = commitDBErrorString(db);
-
-        db.rollback();
-        db.close();
-
-        QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
-
-        return;
-    }
-
-    db.close();
-    QSqlDatabase::removeDatabase(CORE_CONNECTION_TO_DB_NAME);
 
     if (!startSync())
     {
-        _errorString = QString("Cannot start sync");
+        // в случае ошибки нам прилетит errorOccurredSync(...)
+        return;
+    }
+
+    if (!startTanks())
+    {
+        // в случае ошибки нам прилетит errorOccurredTanks(...)
+        return;
     }
 }
 
@@ -152,22 +124,36 @@ void Core::stop()
 {
     emit stopAll();
 
-    for (const auto& thread: _tanksThread)
+    //Sync
+    if (_sync)
     {
-        Q_CHECK_PTR(thread->thread);
-
-        if (thread->thread != nullptr)
-        {
-            thread->thread->wait();
-        }
+        _sync->thread->wait();
     }
 
-    _tanksThread.clear();
+    _sync.reset(nullptr);
 
-    Q_CHECK_PTR(_syncThread->thread);
-    if (_syncThread->thread != nullptr)
+    //Tanks
+    if (_tanks)
     {
-        _syncThread->thread->wait();
+        _tanks->thread->wait();
     }
-    _syncThread.reset(nullptr);
+    _tanks.reset(nullptr);
+
+    //TanksConfig
+    _tanksConfig.reset(nullptr);
+}
+
+void Core::errorOccurredTankConfig(Common::EXIT_CODE errorCode, const QString &errorString)
+{
+    emit errorOccurred(errorCode, QString("Error Tank config: %1").arg(errorString));
+}
+
+void Core::errorOccurredTanks(Common::EXIT_CODE errorCode, const QString &errorString)
+{
+    emit errorOccurred(errorCode, QString("Error Tanks: %1").arg(errorString));
+}
+
+void Core::errorOccurredSync(Common::EXIT_CODE errorCode, const QString &errorString)
+{
+    emit errorOccurred(errorCode, QString("Error Sync: %1").arg(errorString));
 }

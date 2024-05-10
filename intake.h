@@ -1,63 +1,41 @@
 #ifndef INTAKE_H
 #define INTAKE_H
 
-//QT
-#include <QObject>
-#include <QTimer>
-#include <QHash>
-#include <QString>
+//STL
+#include <list>
 
 //My
-#include "commondefines.h"
 #include "tconfig.h"
-#include "tankstatuses.h"
+#include "tankstatus.h"
+#include "tankid.h"
 
 namespace LevelGaugeService
 {
 
 class Intake final
-    : public QObject
 {
-    Q_OBJECT
 
 public:
-    Intake(const Intake&) = delete;
-    Intake& operator =(const Intake&) = delete;
-    Intake(const Intake&&) = delete;
-    Intake& operator =(const Intake&&) = delete;
+    Intake(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatus& startTankStatus,
+           const LevelGaugeService::TankStatus& finishTankStatus);
 
-    explicit Intake(const TankStatuses& tankStatuses, QObject *parent = nullptr);
     ~Intake();
 
-public:
-    void start();
-    void stop();
-    void calculateIntake();
+    const LevelGaugeService::TankID id() const;
+    const LevelGaugeService::TankStatus& startTankStatus() const;
+    const LevelGaugeService::TankStatus& finishTankStatus() const;
 
 private:
-    void saveIntake();          //Находит и сохраняет приходы
-    TankStatuses::TankStatusesIterator getStartIntake();    //возвращает итератор на начало приема топлива
-    TankStatuses::TankStatusesIterator getFinishedIntake(); //возвращает итератор на конец приема топлива
-
-private:
-    struct TankConfig
-    {
-        TankID id;
-        QDateTime lastIntake;
-        QString dbNitName;
-        float deltaIntake = 0.0;
-    };
-
-private:
-    TConfig *_cnf = nullptr;
-
-    mutable QSqlDatabase _dbNit;   //база данных АО НИТ
-
-    TankStatuses _tankStatuses;
-    TankConfig _tankConfig;
+   const LevelGaugeService::TankID _id;
+   const LevelGaugeService::TankStatus _startTankStatus;
+   const LevelGaugeService::TankStatus _finishTankStatus;
 
 }; //class Intake
 
+using IntakesList = std::list<Intake>;
+
 } //namespace LevelGaugeService
+
+Q_DECLARE_METATYPE(LevelGaugeService::IntakesList);
 
 #endif // INTAKE_H

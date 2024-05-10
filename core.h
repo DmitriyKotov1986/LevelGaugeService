@@ -13,7 +13,8 @@
 //My
 #include "Common/tdbloger.h"
 #include "tconfig.h"
-#include "tank.h"
+#include "tankconfig.h"
+#include "tanks.h"
 #include "sync.h"
 
 namespace LevelGaugeService
@@ -36,37 +37,41 @@ public:
     void start();
     void stop();
 
-    QString errorString();
-    bool isError() const { return !_errorString.isEmpty(); }
-
 signals:
-   void stopAll();
+    void errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString);
+    void stopAll();
+
+private slots:
+    void errorOccurredTankConfig(Common::EXIT_CODE errorCode, const QString& errorString);
+    void errorOccurredTanks(Common::EXIT_CODE errorCode, const QString& errorString);
+    void errorOccurredSync(Common::EXIT_CODE errorCode, const QString& errorString);
 
 private:
-    struct TankThread
-    {
-        std::unique_ptr<Tank> tank;
-        std::unique_ptr<QThread> thread;
-    };
-
-    struct SyncThread
-    {
-        std::unique_ptr<Sync> sync;
-        std::unique_ptr<QThread> thread;
-    };
-
-private:
+    bool startTankConfig();
+    bool startTanks();
     bool startSync();
 
 private:
     TConfig* _cnf = nullptr;
     Common::TDBLoger* _loger = nullptr;
 
-    QString _errorString;
+    std::unique_ptr<TanksConfig> _tanksConfig;  //список конфигураций резервуаров
 
-    std::vector<std::unique_ptr<TankThread>> _tanksThread;  //список конфигураций резервуаров
+    struct TanksThread
+    {
+        std::unique_ptr<QThread> thread;
+        std::unique_ptr<LevelGaugeService::Tanks> tanks;
+    };
 
-    std::unique_ptr<SyncThread> _syncThread; //поток синхронизации с БД АО НИТ
+    std::unique_ptr<TanksThread> _tanks;
+
+    struct SyncThread
+    {
+        std::unique_ptr<QThread> thread;
+        std::unique_ptr<LevelGaugeService::Sync> sync;
+    };
+
+    std::unique_ptr<SyncThread> _sync; //поток синхронизации с БД АО НИТ
 
 };
 

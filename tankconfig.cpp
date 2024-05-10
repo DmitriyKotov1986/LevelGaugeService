@@ -1,106 +1,127 @@
+//STL
+#include <exception>
+
 //QT
 #include <QSqlQuery>
+#include <QMutex>
+#include <QMutexLocker>
 
 //My
-#include "Common/Common.h"
+#include "Common/common.h"
 
 #include "tankconfig.h"
 
 using namespace LevelGaugeService;
 using namespace Common;
 
-TankConfig::TankConfig(const TankID& id, const QString& dbConnectionName)
-    : _dbConnectionName(dbConnectionName)
+static const QString TANKS_CONFIG_CONNECTION_TO_DB_NAME = "TANKS_CONFIG_DB";
+static QMutex lastTimeMutex;
+
+//statis
+TankConfig::Status TankConfig::intToStatus(quint8 status)
+{
+    switch (status)
+    {
+    case static_cast<quint8>(Status::REPAIR): return Status::REPAIR;
+    case static_cast<quint8>(Status::INTAKE): return Status::INTAKE;
+    case static_cast<quint8>(Status::PUMPING_OUT): return Status::PUMPING_OUT;
+    case static_cast<quint8>(Status::STUGLE): return Status::STUGLE;
+    case static_cast<quint8>(Status::UNDEFINE): return Status::UNDEFINE;
+    default: Q_ASSERT(false);
+    }
+
+    return Status::UNDEFINE;
+}
+
+TankConfig::Mode TankConfig::intToMode(quint8 mode)
+{
+    switch (mode)
+    {
+    case static_cast<quint8>(Mode::AZS): return Mode::AZS;
+    case static_cast<quint8>(Mode::OIL_DEPOT): return Mode::OIL_DEPOT;
+    case static_cast<quint8>(Mode::UNDEFINE): return Mode::UNDEFINE;
+    default: Q_ASSERT(false);
+    }
+
+    return Mode::UNDEFINE;
+}
+
+TankConfig::Type TankConfig::intToType(quint8 type)
+{
+    switch (type)
+    {
+    case static_cast<quint8>(Type::HORIZONTAL): return Type::HORIZONTAL;
+    case static_cast<quint8>(Type::VERTICAL): return Type::VERTICAL;
+    case static_cast<quint8>(Type::UNDEFINE): return Type::UNDEFINE;
+    default: Q_ASSERT(false);
+    }
+
+    return Type::UNDEFINE;
+}
+
+TankConfig::ProductStatus TankConfig::intToProductStatus(quint8 productStatus)
+{
+    switch ( productStatus)
+    {
+    case static_cast<quint8>(ProductStatus::PASPORT): return ProductStatus::PASPORT;
+    case static_cast<quint8>(ProductStatus::UNPASPORT): return ProductStatus::UNPASPORT;
+    case static_cast<quint8>(ProductStatus::UNDEFINE): return ProductStatus::UNDEFINE;
+    default: Q_ASSERT(false);
+    }
+
+    return ProductStatus::UNDEFINE;
+}
+
+//class
+TankConfig::TankConfig(const TankID& id, const QString& name, float totalVolume, float diametr, qint64 timeShift, Mode mode, Type type,
+                       const Delta& deltaMax, const Delta& deltaIntake, float deltaIntakeHeight, float deltaPumpingOutHeight, Status status, const QString& serviceDB, const QString& product,
+                       ProductStatus productStatus, const QDateTime& lastMeasuments, const QDateTime& lastSave, const QDateTime& lastIntake, QObject* parent /* = nullptr */)
+    : QObject{parent}
     , _id(id)
+    , _name(name)
+    , _totalVolume(totalVolume)
+    , _diametr(diametr)
+    , _timeShift(timeShift)
+    , _deltaMax(deltaMax)
+    , _deltaIntake(deltaIntake)
+    , _deltaIntakeHeight(deltaIntakeHeight)
+    , _deltaPumpingOutHeight(deltaPumpingOutHeight)
+    , _status(status)
+    , _mode(mode)
+    , _type(type)
+    , _serviceDB(serviceDB)
+    , _product(product)
+    , _productStatus(productStatus)
+    , _lastMeasuments(lastMeasuments)
+    , _lastSave(lastSave)
+    , _lastIntake(lastIntake)
 {
+    Q_ASSERT(_id.tankNumber() != 0);
+    Q_ASSERT(!_id.levelGaugeCode().isEmpty());
+    Q_ASSERT(!_name.isEmpty());
+    Q_ASSERT(_totalVolume > 0.0);
+    Q_ASSERT(_diametr > 0.0);
+    Q_ASSERT(_deltaMax.checkDelta());
+    Q_ASSERT(_deltaIntake.checkDelta());
+    Q_ASSERT(_deltaIntakeHeight > 0.0);
+    Q_ASSERT(_deltaPumpingOutHeight > 0.0);
+    Q_ASSERT(!_serviceDB.isEmpty());
+    Q_ASSERT(!_product.isEmpty());
+    Q_ASSERT(_type != Type::UNDEFINE);
+    Q_ASSERT(_mode != Mode::UNDEFINE);
+    Q_ASSERT(_productStatus != ProductStatus::UNDEFINE);
+
+    makeLimits();
 }
 
-bool LevelGaugeService::TankConfig::loadFromDB()
-{
-    if (_dbConnectionName.isEmpty())
-    {
-        _errorString = "";
-        return false;
-    }
-    auto db = QSqlDatabase::addDatabase(_dbConnectionName);
-
-    Q_ASSERT(db.isOpen());
-
-    db.transaction();
-    QSqlQuery query(db);
-    query.setForwardOnly(true);
-
-    //загружаем данные об АЗС
-    const QString queryText =
-            QString("SELECT"
-                        "[Volume], [Diametr], [LastSaveDateTime], [TimeShift], "
-                        "[DeltaVolume], [DeltaMass], [DeltaDensity], [DeltaHeight], [DeltaTemp], "
-                        "[DeltaIntakeVolume], [DeltaIntakeMass], [DeltaIntakeDensity], [DeltaIntakeHeight], [DeltaIntakeTemp], "
-                        "[IntakeDetectHeight] "
-                    "FROM [dbo].[TanksInfo]"
-                    "WHERE [AZSCode] = '%1' AND [TankNumber] = %2")
-            .arg(_id.levelGaugeCode())
-            .arg(_id.tankNumber());
-
-    if (!query.exec(queryText))
-    {
-        _errorString = executeDBErrorString(db, query);
-
-        db.rollback();
-
-        return false;
-    }
-
-    if (query.next())
-    {
-        _totalVolume = query.value("Volume").toFloat();
-        _diametr = query.value("Diametr").toFloat();
-        _lastSave = query.value("LastSaveDateTime").toDateTime();
-        _lastMeasuments = query.value("LastSaveDateTime").toDateTime();
-        _timeShift = query.value("TimeShift").toInt(); //cмещение времени относительно сервера
-
-        _deltaMax.volume = query.value("DeltaVolum").toFloat();
-        _deltaMax.mass = query.value("DeltaMass").toFloat();
-        _deltaMax.density = query.value("DeltaDensity").toFloat();
-        _deltaMax.height = query.value("DeltaHeight").toFloat();
-        _deltaMax.temp = query.value("DeltaTemp").toFloat();
-
-        _deltaIntake.volume = query.value("DeltaIntakeVolum").toFloat();
-        _deltaIntake.mass = query.value("DeltaIntakeMass").toFloat();
-        _deltaIntake.density = query.value("DeltaIntakeDensity").toFloat();
-        _deltaIntake.height = query.value("DeltaIntakeHeight").toFloat();
-        _deltaIntake.temp = query.value("DeltaIntakeTemp").toFloat();
-
-        _deltaIntakeHeight = query.value("IntakeDetectHeight").toFloat();
-    }
-    else
-    {
-        _errorString = QString("Cannot load tank configuration with AZSCode = %1 TankNumber = %2")
-                               .arg(_id.levelGaugeCode())
-                               .arg(_id.tankNumber());
-
-        return false;
-    }
-
-    if (!db.commit())
-    {
-        _errorString = commitDBErrorString(db);
-
-        db.rollback();
-
-        return false;
-    }
-
-    return true;
-}
 
 void TankConfig::makeLimits()
 {
-    _tankConfig.limits.density = std::make_pair<float>(350.0, 1200.0);
-    _tankConfig.limits.height  = std::make_pair<float>(0.0, _tankConfig.diametr);
-    _tankConfig.limits.mass    = std::make_pair<float>(0.0, _tankConfig.totalVolume * _tankConfig.limits.density.second);
-    _tankConfig.limits.volume  = std::make_pair<float>(0.0, _tankConfig.totalVolume);
-    _tankConfig.limits.temp    = std::make_pair<float>(-50.0, 100.0);
+    _limits.density = std::make_pair<float>(350.0, 1200.0);
+    _limits.height  = std::make_pair<float>(0.0, _diametr);
+    _limits.mass    = std::make_pair<float>(0.0, _totalVolume * _limits.density.second);
+    _limits.volume  = std::make_pair<float>(0.0, _totalVolume);
+    _limits.temp    = std::make_pair<float>(-50.0, 100.0);
 }
 
 const TankID &TankConfig::tankId() const
@@ -108,15 +129,131 @@ const TankID &TankConfig::tankId() const
     return _id;
 }
 
-bool TankConfig::isError() const
+const QString& TankConfig::name() const
 {
-    return !_errorString.isEmpty();
+    return _name;
 }
 
-QString TankConfig::errorString()
+float TankConfig::totalVolume() const
 {
-    QString result = _errorString;
-    _errorString.clear();
+    return _totalVolume;
+}
 
-    return result;
+float TankConfig::diametr() const
+{
+    return _diametr;
+}
+
+qint64 TankConfig::timeShift() const
+{
+    return _timeShift;
+}
+
+const TankConfig::Limits &TankConfig::limits() const
+{
+    return _limits;
+}
+
+const TankConfig::Delta &TankConfig::deltaMax() const
+{
+    return _deltaMax;
+}
+
+const TankConfig::Delta &TankConfig::deltaIntake() const
+{
+    return _deltaIntake;
+}
+
+float TankConfig::deltaIntakeHeight() const
+{
+    return _deltaIntakeHeight;
+}
+
+float TankConfig::deltaPumpingOutHeight() const
+{
+    return _deltaPumpingOutHeight;
+}
+
+TankConfig::Status TankConfig::status() const
+{
+    return _status;
+}
+
+TankConfig::Mode TankConfig::mode() const
+{
+    return _mode;
+}
+
+TankConfig::Type TankConfig::type() const
+{
+    return _type;
+}
+
+const QString &TankConfig::serviceDB() const
+{
+    return _serviceDB;
+}
+
+const QString &TankConfig::product() const
+{
+    return _product;
+}
+
+TankConfig::ProductStatus TankConfig::productStatus() const
+{
+    return _productStatus;
+}
+
+const QDateTime &TankConfig::lastMeasuments() const
+{
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    return _lastMeasuments;
+}
+
+void TankConfig::setLastMeasuments(const QDateTime &lastTime)
+{
+    Q_ASSERT(_lastMeasuments <= lastTime);
+
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    _lastMeasuments = lastTime;
+
+    emit lastMeasuments(_id, lastTime);
+}
+
+const QDateTime &TankConfig::lastSave() const
+{
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    return _lastSave;
+}
+
+void TankConfig::setLastSave(const QDateTime &lastTime)
+{
+    Q_ASSERT(_lastSave <= lastTime);
+
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    _lastSave = lastTime;
+
+    emit lastSave(_id, lastTime);
+}
+
+const QDateTime &TankConfig::lastIntake() const
+{
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    return _lastIntake;
+}
+
+void TankConfig::setLastIntake(const QDateTime &lastTime)
+{
+    Q_ASSERT(_lastIntake <= lastTime);
+
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    _lastIntake = lastTime;
+
+    emit lastIntake(_id, lastTime);
 }

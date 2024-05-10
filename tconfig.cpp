@@ -6,6 +6,7 @@
 #include <QFileInfo>
 
 using namespace  LevelGaugeService;
+using namespace Common;
 
 //static
 static TConfig* configPtr = nullptr;
@@ -47,7 +48,7 @@ TConfig::TConfig(const QString& configFileName) :
         return;
     }
 
-    qDebug() << QString("%1 %2").arg(QTime::currentTime().toString("hh:mm:ss")).arg("Reading configuration from " +  _configFileName);
+    qDebug() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg("Reading configuration from " +  _configFileName);
 
     QSettings ini(_configFileName, QSettings::IniFormat);
 
@@ -58,9 +59,9 @@ TConfig::TConfig(const QString& configFileName) :
 
         return;
     }
-    if (!groups.contains("SERVER"))
+    if (!groups.contains("NIT_DATABASE"))
     {
-        _errorString = "Configuration file not contains [SERVER] group";
+        _errorString = "Configuration file not contains [NIT_DATABASE] group";
 
         return;
     }
@@ -78,13 +79,13 @@ TConfig::TConfig(const QString& configFileName) :
 
     //AO Nit Database
     ini.beginGroup("NIT_DATABASE");
-    _dbConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
-    _dbConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
-    _dbConnectionInfo.db_UserName = ini.value("UID", "").toString();
-    _dbConnectionInfo.db_Password = ini.value("PWD", "").toString();
-    _dbConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();
-    _dbConnectionInfo.db_Port = ini.value("Port", "").toUInt();
-    _dbConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
+    _dbNitConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
+    _dbNitConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
+    _dbNitConnectionInfo.db_UserName = ini.value("UID", "").toString();
+    _dbNitConnectionInfo.db_Password = ini.value("PWD", "").toString();
+    _dbNitConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();
+    _dbNitConnectionInfo.db_Port = ini.value("Port", "").toUInt();
+    _dbNitConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
     ini.endGroup();
 
     //System
@@ -147,7 +148,6 @@ bool TConfig::save()
 
     ini.remove("");
 
-    ini.setValue("LastSaveID", _sys_lastSaveId);
     ini.setValue("DebugMode", _sys_DebugMode);
 
     ini.endGroup();
@@ -157,16 +157,10 @@ bool TConfig::save()
 
     if (_sys_DebugMode)
     {
-        qDebug() << QString("%1 %2").arg(QTime::currentTime().toString("hh:mm:ss")).arg("Save configuration to " +  _configFileName);
+        qDebug() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg("Save configuration to " +  _configFileName);
     }
 
     return true;
-}
-
-void TConfig::sys_setLastSaveId(quint64 id)
-{
-    _sys_lastSaveId = id;
-    save();
 }
 
 QString TConfig::errorString()

@@ -4,6 +4,7 @@
 //STL
 #include <map>
 #include <memory>
+#include <optional>
 
 //QT
 #include <QObject>
@@ -12,11 +13,14 @@
 #include <QTimer>
 #include <QRandomGenerator>
 #include <QPair>
+#include <QHash>
+#include <QThread>
 
 //My
 #include "Common/Common.h"
-#include "commondefines.h"
+#include "intake.h"
 #include "tankstatuses.h"
+#include "tankconfig.h"
 
 namespace LevelGaugeService
 {
@@ -30,31 +34,6 @@ class Tank
 
     friend TankTest;
 
-public:
-
-
-    struct TankConfig //конфигурация резервуара
-    {
-        TankID id;
-
-        float totalVolume = 0.0;   //Объем резервуара
-        float diametr = 0.0;      //Диаметр резервуара
-        qint64 timeShift = 0;     //смещение времени на АЗС относительно сервера в секундах
-
-        Limits limits;           //Пределы значений
-
-        Delta deltaMax;     //максимально допустимое изменение параметров резервуара за 1 минуту при нормальной работе
-        Delta deltaIntake;  //максимально допустимое изменение параметров резервуара за 1 минуту при приеме топлива
-
-        float deltaIntakeHeight = 0.0; //пороговое значение изменения уровня топлива за 10 минут с котого считаем что произошел прием
-
-        QDateTime lastMeasuments = QDateTime::currentDateTime(); //время последней загруженной записи из БД Измерений
-        QDateTime lastSave = QDateTime::currentDateTime();       //время последней сохраненной записи (время АЗС)
-    };
-
-private:
-    static QString additionFlagToString(quint8 flag);
-
 public:   
     Tank() = delete;
     Tank(const Tank&) = delete;
@@ -62,12 +41,70 @@ public:
     Tank(const Tank&&) = delete;
     Tank& operator =(const Tank&&) = delete;
 
-    explicit Tank(const TankID& id, const Common::DBConnectionInfo& dbConnectionInfo, QObject *parent = nullptr);
+    explicit Tank(const LevelGaugeService::TankConfig* tankConfig, QObject *parent = nullptr);
     ~Tank();
 
 public slots:
     void start();
     void stop();
+
+    void newStatus(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+
+private slots:
+    void addStatusEnd();
+
+signals:
+    void calculateStatus(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void intake(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intake);
+    void errorOccurred(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg) const;
+    void finished() const;
+
+private:
+    using TankStatusesIterator =  LevelGaugeService::TankStatuses::iterator;
+
+private:
+    void addStatuses(const LevelGaugeService::TankStatusesList& tankStatuses);
+
+    void addStatus(const LevelGaugeService::TankStatus& tankStatus);
+
+    void addStatusesRange(const LevelGaugeService::TankStatus& tankStatus);
+    void addStatusesIntake(const LevelGaugeService::TankStatus& tankStatus);
+
+    void addRandom(LevelGaugeService::TankStatus* tankStatus) const;
+    void checkLimits(LevelGaugeService::TankStatus* tankStatus) const; //провеверяет лимитные ограничения статусов
+
+    void sendNewStatusesToSave();
+
+    void clearTankStatuses();
+
+    TankStatusesIterator getStartIntake();
+    TankStatusesIterator getFinishedIntake();
+    void findIntake();
+
+    TankStatusesIterator getStartPumpingOut();
+    TankStatusesIterator getFinishedPumpingOut();
+    void findPumpingOut();
+
+private:
+    const LevelGaugeService::TankConfig* _tankConfig = nullptr; //Конфигурация резервуар
+
+    QRandomGenerator* _rg = nullptr;  //генератор случайных чисел для имитации разброса параметров при измерении в случае подстановки
+
+    LevelGaugeService::TankStatuses _tankStatuses;
+    QDateTime _lastSendToSaveDateTime;
+
+    std::optional<QDateTime> _isIntake;
+    std::optional<QDateTime> _isPumpingOut;
+
+    QTimer* _addEndTimer = nullptr;
+
+};
+
+/*
+
+
+
+
 
 private slots:
     void calculate();
@@ -84,19 +121,21 @@ private:
 
     void loadTankConfig();
 
-    void initFromSave();        //загружает данне о предыдыщих сохранениях из БД
-    void loadFromMeasument();   //загружает новые данные из таблицы измерений
+    void initFromSave();
+    void loadFromMeasument();
     void makeResultStatus();         //
     void statusDetect();
-    void checkLimits(TankStatuses::TankStatusesIterator start_it);         //провеверяет лимитные ограничения статусов
+ //   void checkLimits(TankStatuses::TankStatusesIterator start_it);         //провеверяет лимитные ограничения статусов
     void addStatusRange(const QDateTime& targetDateTime, const TankStatuses::TankStatus& targetStatus);
     void addStatusIntake(const TankStatuses::TankStatus& targetStatus);
     void addStatusEnd();
-    void addRandom(TankStatuses::TankStatusesIterator it);
+ //   void addRandom(TankStatuses::TankStatusesIterator it);
     void sendNewStatuses();
-    void clearTankStatus();
+
 
 private:
+    const TankID _id;
+
     TankConfig _tankConfig; //Конфигурация резервуар
     TankStatuses _tankResultStatuses; //карта результирующих состояний
     TankStatuses _tankTargetStatuses; //карта целевых состояний
@@ -107,9 +146,9 @@ private:
 
     QTimer* _timer = nullptr;
 
-    QRandomGenerator* rg = nullptr;  //генератор случайных чисел для имитации разброса параметров при измерении в случае подстановки
-};
 
+};
+*/
 } //namespace LevelGaugeService
 
 #endif // TANK_H

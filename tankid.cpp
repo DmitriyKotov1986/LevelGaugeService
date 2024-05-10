@@ -12,11 +12,15 @@ TankID::TankID(const QString &levelGaugeCode, quint8 tankNumber)
 
 const QString &TankID::levelGaugeCode() const
 {
+    Q_ASSERT(!_levelGaugeCode.isEmpty());
+
     return _levelGaugeCode;
 }
 
 quint8 TankID::tankNumber() const
 {
+    Q_ASSERT(_tankNumber != 0);
+
     return _tankNumber;
 }
 

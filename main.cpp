@@ -14,7 +14,6 @@
 
 using namespace LevelGaugeService;
 using namespace Common;
-using namespace QtService;
 
 int main(int argc, char *argv[])
 {
@@ -32,8 +31,6 @@ int main(int argc, char *argv[])
 
         return EXIT_CODE::OK;
     }
-
-    Common::exitIfAlreadyRun();
 
     const QString applicationDirName = QFileInfo(argv[0]).absolutePath();
     const QString configFileName = QString("%1/%2.ini").arg(applicationDirName).arg(QCoreApplication::applicationName());
