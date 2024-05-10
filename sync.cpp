@@ -61,7 +61,7 @@ void Sync::stop()
     emit finished();
 }
 
-void Sync::newStatuses(const TankID &id, const TankStatusesList &tankStatuses)
+void Sync::calculateStatuses(const TankID &id, const TankStatusesList &tankStatuses)
 {
     Q_ASSERT(tankStatuses.isEmpty());
 
@@ -257,7 +257,7 @@ void Sync::executeDBQuery(QSqlDatabase &db, const QString& queryText)
     }
 }
 
-void Sync::newIntakes(const TankID &id, const IntakesList &intakes)
+void Sync::calculateIntakes(const TankID &id, const IntakesList &intakes)
 {
     Q_ASSERT(!intakes.empty());
 

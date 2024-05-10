@@ -55,7 +55,7 @@ void Tank::stop()
     emit finished();
 }
 
-void Tank::newStatus(const TankID &id, const TankStatusesList &tankStatuses)
+void Tank::newStatuses(const TankID &id, const TankStatusesList &tankStatuses)
 {
     if (id != _tankConfig->tankId())
     {
@@ -220,8 +220,7 @@ void Tank::sendNewStatusesToSave()
 
     if (!statusesForSave.isEmpty())
     {
-        emit calculateStatus(_tankConfig->tankId(), statusesForSave);
-
+        emit calculateStatuses(_tankConfig->tankId(), statusesForSave);
     }
 
     clearTankStatuses();
@@ -384,6 +383,8 @@ void Tank::addStatusEnd()
 {
     if (_tankStatuses.empty())
     {
+        emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::WARNING_CODE, "There is no status for the tank");
+
         return;
     }
 
@@ -516,7 +517,7 @@ void Tank::findIntake()
 
     intakesList.emplace_back(std::move(tmp));
 
-    emit intake(_tankConfig->tankId(), intakesList);
+    emit calculateIntakes(_tankConfig->tankId(), intakesList);
 }
 
 Tank::TankStatusesIterator Tank::getStartPumpingOut()

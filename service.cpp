@@ -83,7 +83,7 @@ void Service::start()
         _core = new Core();
 
         QObject::connect(_core, SIGNAL(errorOccurred(Common::EXIT_CODE, const QString&)),
-                         SLOT(errorOccurreCore(Common::EXIT_CODE, const QString&)));
+                         SLOT(errorOccurredCore(Common::EXIT_CODE, const QString&)));
 
         _core->start();
 

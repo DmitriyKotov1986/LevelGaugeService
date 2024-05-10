@@ -172,18 +172,16 @@ bool TanksConfig::loadFromDB()
                 throw TankConfigLoadException(QString("Invalid value [TanksInfo]/ProductStatus. Record ID: %1").arg(recordID));
             }
 
-
-
             auto tankConfig_p = std::make_unique<TankConfig>(id, name, totalVolume, diametr, timeShift, mode , type, deltaMax, deltaIntake,
                                                              deltaIntakeHeight, deltaPumpingOutHeight, status, serviceDB, product, productStatus,
                                                              lastMeasuments, lastSave, lastIntake);
 
-            QObject::connect(tankConfig_p.get(), SIGNAL(lastMeasuments(const LevelGaugeService::TankID& id, const QDateTime& lastTime)),
-                             SLOT(lastMeasuments(const LevelGaugeService::TankID& id, const QDateTime& lastTime)));
-            QObject::connect(tankConfig_p.get(), SIGNAL(lastSave(const LevelGaugeService::TankID& id, const QDateTime& lastTime)),
-                             SLOT(lastSave(const LevelGaugeService::TankID& id, const QDateTime& lastTime)));
-            QObject::connect(tankConfig_p.get(), SIGNAL(lastIntake(const LevelGaugeService::TankID& id, const QDateTime& lastTime)),
-                             SLOT(lastintake(const LevelGaugeService::TankID& id, const QDateTime& lastTime)));
+            QObject::connect(tankConfig_p.get(), SIGNAL(lastMeasuments(const LevelGaugeService::TankID&, const QDateTime&)),
+                             SLOT(lastMeasuments(const LevelGaugeService::TankID&, const QDateTime&)));
+            QObject::connect(tankConfig_p.get(), SIGNAL(lastSave(const LevelGaugeService::TankID&, const QDateTime&)),
+                             SLOT(lastSave(const LevelGaugeService::TankID&, const QDateTime&)));
+            QObject::connect(tankConfig_p.get(), SIGNAL(lastIntake(const LevelGaugeService::TankID&, const QDateTime&)),
+                             SLOT(lastIntake(const LevelGaugeService::TankID&, const QDateTime&)));
 
             _tanksConfig.emplace(id, std::move(tankConfig_p));
         }
@@ -198,6 +196,13 @@ bool TanksConfig::loadFromDB()
         _db.rollback();
 
         emit errorOccurred(EXIT_CODE::LOAD_CONFIG_ERR, commitDBErrorString(_db));
+
+        return false;
+    }
+
+    if (_tanksConfig.empty())
+    {
+        emit errorOccurred(EXIT_CODE::LOAD_CONFIG_ERR, "No tanks for work. Total tanks: 0");
 
         return false;
     }

@@ -17,7 +17,7 @@
 #include <QQueue>
 
 //My
-#include "tconfig.h"
+#include "Common/common.h"
 #include "tankstatuses.h"
 #include "tanksconfig.h"
 #include "intake.h"
@@ -44,14 +44,15 @@ public:
     ~Sync();
 
 public slots:
-    void newStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
-    void newIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+    void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
 
     void start();
     void stop();
 
 signals:
     void errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString);
+    void sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg);
     void finished() const;
 
 private:

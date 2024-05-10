@@ -39,8 +39,8 @@ public slots:
     void stop();
 
 private slots:
-    void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
-    void intake(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+    void calculateStatusesTank(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void calculateIntakesTank(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
     void errorOccurredTank(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg);
     void sendLogMsgTank(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg);
 
@@ -53,7 +53,9 @@ signals:
     void finished();
 
     void newStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
-    void newIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
+
+    void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
 
 private:
     bool loadFromCalculatedDB();  //загружает данне о предыдыщих сохранениях из БД

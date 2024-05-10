@@ -13,6 +13,9 @@ Tanks::Tanks(const Common::DBConnectionInfo dbConnectionInfo, LevelGaugeService:
     , _tanksConfig(tanksConfig)
 {
     Q_CHECK_PTR(_tanksConfig);
+
+    qRegisterMetaType<LevelGaugeService::TankStatusesList>("TankStatusesList");
+    qRegisterMetaType<LevelGaugeService::IntakesList>("IntakesList");
 }
 
 Tanks::~Tanks()
@@ -41,7 +44,7 @@ void Tanks::start()
 
     _checkNewMeasumentsTimer = new QTimer();
 
-    QObject::connect(_checkNewMeasumentsTimer, SIGNAL(timeout()), SLOT(_checkNewMeasument()));
+    QObject::connect(_checkNewMeasumentsTimer, SIGNAL(timeout()), SLOT(checkNewMeasuments()));
 
     _checkNewMeasumentsTimer->start(60000);
 }
@@ -72,18 +75,18 @@ void Tanks::stop()
     emit finished();
 }
 
-void Tanks::calculateStatuses(const TankID &id, const TankStatusesList& tankStatuses)
+void Tanks::calculateStatusesTank(const TankID &id, const TankStatusesList& tankStatuses)
 {
     Q_ASSERT(!tankStatuses.isEmpty());
 
-    emit newStatuses(id, tankStatuses);
+    emit calculateStatuses(id, tankStatuses);
 }
 
-void Tanks::intake(const TankID &id, const IntakesList &intakes)
+void Tanks::calculateIntakesTank(const TankID &id, const IntakesList &intakes)
 {
     Q_ASSERT(!intakes.empty());
 
-    emit newIntakes(id, intakes);
+    emit calculateIntakes(id, intakes);
 }
 
 void Tanks::errorOccurredTank(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg)
@@ -380,19 +383,19 @@ bool Tanks::makeTanks()
         QObject::connect(tmp->thread.get(), SIGNAL(started()), tmp->tank.get(), SLOT(start()), Qt::DirectConnection);
         QObject::connect(tmp->tank.get(), SIGNAL(finished()), tmp->thread.get(), SLOT(quit()), Qt::DirectConnection);
 
-        QObject::connect(this, SIGNAL(stopAll), tmp->tank.get(), SLOT(stop()), Qt::QueuedConnection);
+        QObject::connect(this, SIGNAL(stopAll()), tmp->tank.get(), SLOT(stop()), Qt::QueuedConnection);
 
         QObject::connect(tmp->tank.get(), SIGNAL(errorOccurred(const LevelGaugeService::TankID&, Common::EXIT_CODE, const QString&)),
                          SLOT(errorOccurredTank(const LevelGaugeService::TankID&, Common::EXIT_CODE, const QString&)), Qt::QueuedConnection);
-        QObject::connect(tmp->tank.get(), SIGNAL(sendLogMsg(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg)),
-                         SLOT(sendLogMsgTank(Common::TDBLoger::MSG_CODE category, const QString &msg)), Qt::QueuedConnection);
+        QObject::connect(tmp->tank.get(), SIGNAL(sendLogMsg(const LevelGaugeService::TankID&, Common::TDBLoger::MSG_CODE, const QString&)),
+                         SLOT(sendLogMsgTank(const LevelGaugeService::TankID&, Common::TDBLoger::MSG_CODE, const QString &)), Qt::QueuedConnection);
 
-        QObject::connect(tmp->tank.get(), SIGNAL(calculateStatus(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
-                         SLOT(calculateStatus(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
-        QObject::connect(tmp->tank.get(), SIGNAL(intake(const LevelGaugeService::TankID&, const LevelGaugeService::Intakeslist&)),
-                         SLOT(intake(const LevelGaugeService::TankID&, const LevelGaugeService::Intakeslist&)), Qt::QueuedConnection);
-        QObject::connect(this, SIGNAL(newStatus(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusList&)),
-                         SLOT(newStatus(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusList&)), Qt::QueuedConnection);
+        QObject::connect(tmp->tank.get(), SIGNAL(calculateStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
+                         SLOT(calculateStatusesTank(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
+        QObject::connect(tmp->tank.get(), SIGNAL(calculateIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)),
+                         SLOT(calculateIntakesTank(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)), Qt::QueuedConnection);
+        QObject::connect(this, SIGNAL(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
+                         tmp->tank.get(), SLOT(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
 
         tmp->thread->start();
 

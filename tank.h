@@ -17,7 +17,8 @@
 #include <QThread>
 
 //My
-#include "Common/Common.h"
+#include "Common/common.h"
+#include "Common/tdbloger.h"
 #include "intake.h"
 #include "tankstatuses.h"
 #include "tankconfig.h"
@@ -48,15 +49,16 @@ public slots:
     void start();
     void stop();
 
-    void newStatus(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void newStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
 
 private slots:
     void addStatusEnd();
 
 signals:
-    void calculateStatus(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
-    void intake(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intake);
+    void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
+    void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
     void errorOccurred(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg) const;
+        void sendLogMsg(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg);
     void finished() const;
 
 private:

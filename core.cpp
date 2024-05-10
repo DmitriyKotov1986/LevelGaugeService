@@ -39,12 +39,12 @@ bool Core::startSync()
     QObject::connect(_sync->thread.get(), SIGNAL(started()), _sync->sync.get(), SLOT(start()), Qt::DirectConnection);
     QObject::connect(_sync->sync.get(), SIGNAL(finished()), _sync->thread.get(), SLOT(quit()), Qt::DirectConnection);
 
-    QObject::connect(this, SIGNAL(stopAll), _sync->sync.get(), SLOT(stop()), Qt::QueuedConnection);
+    QObject::connect(this, SIGNAL(stopAll()), _sync->sync.get(), SLOT(stop()), Qt::QueuedConnection);
 
-    QObject::connect(_sync->sync.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
-                     SLOT(errorOccurredSync(Common::EXIT_CODE errorCode, const QString& errorString)), Qt::QueuedConnection);
-    QObject::connect(_sync->sync.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
-                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)), Qt::QueuedConnection);
+    QObject::connect(_sync->sync.get(), SIGNAL(errorOccurred(Common::EXIT_CODE, const QString&)),
+                     SLOT(errorOccurredSync(Common::EXIT_CODE, const QString&)), Qt::QueuedConnection);
+    QObject::connect(_sync->sync.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)), Qt::QueuedConnection);
 
     _sync->thread->start();
 
@@ -58,10 +58,10 @@ bool Core::startTankConfig()
 
     _tanksConfig = std::make_unique<TanksConfig>(_cnf->dbConnectionInfo());
 
-    QObject::connect(_tanksConfig.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
-                     SLOT(errorOccurredTankConfig(Common::EXIT_CODE errorCode, const QString& errorString)));
-    QObject::connect(_tanksConfig.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
-                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)));
+    QObject::connect(_tanksConfig.get(), SIGNAL(errorOccurred(Common::EXIT_CODE, const QString&)),
+                     SLOT(errorOccurredTankConfig(Common::EXIT_CODE, const QString&)));
+    QObject::connect(_tanksConfig.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)));
 
     return _tanksConfig->loadFromDB();
 }
@@ -81,17 +81,17 @@ bool Core::startTanks()
     QObject::connect(_tanks->thread.get(), SIGNAL(started()), _tanks->tanks.get(), SLOT(start()), Qt::DirectConnection);
     QObject::connect(_tanks->tanks.get(), SIGNAL(finished()), _tanks->thread.get(), SLOT(quit()), Qt::DirectConnection);
 
-    QObject::connect(this, SIGNAL(stopAll), _tanks->tanks.get(), SLOT(stop()), Qt::QueuedConnection);
+    QObject::connect(this, SIGNAL(stopAll()), _tanks->tanks.get(), SLOT(stop()), Qt::QueuedConnection);
 
-    QObject::connect(_tanks->tanks.get(), SIGNAL(errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString)),
-                     SLOT(errorOccurredTanks(Common::EXIT_CODE errorCode, const QString& errorString)), Qt::QueuedConnection);
-    QObject::connect(_tanks->tanks.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)),
-                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE category, const QString &msg)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(errorOccurred(Common::EXIT_CODE, const QString&)),
+                     SLOT(errorOccurredTanks(Common::EXIT_CODE, const QString&)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)),
+                     _loger, SLOT(sendLogMsg(Common::TDBLoger::MSG_CODE, const QString&)), Qt::QueuedConnection);
 
-    QObject::connect(_tanks->tanks.get(), SIGNAL(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
-                     _sync->sync.get(), SLOT(newStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
-    QObject::connect(_tanks->tanks.get(), SIGNAL(newIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)),
-                     _sync->sync.get(), SLOT(newIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(calculateStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)),
+                     _sync->sync.get(), SLOT(calculateStatuses(const LevelGaugeService::TankID&, const LevelGaugeService::TankStatusesList&)), Qt::QueuedConnection);
+    QObject::connect(_tanks->tanks.get(), SIGNAL(calculateIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)),
+                     _sync->sync.get(), SLOT(calculateIntakes(const LevelGaugeService::TankID&, const LevelGaugeService::IntakesList&)), Qt::QueuedConnection);
 
     _tanks->thread->start();
 
