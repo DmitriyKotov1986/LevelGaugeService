@@ -33,7 +33,7 @@ class Tank
 {
     Q_OBJECT
 
-    friend TankTest;
+    friend TankTest;    
 
 public:   
     Tank() = delete;
@@ -42,7 +42,7 @@ public:
     Tank(const Tank&&) = delete;
     Tank& operator =(const Tank&&) = delete;
 
-    explicit Tank(const LevelGaugeService::TankConfig* tankConfig, QObject *parent = nullptr);
+    Tank(const LevelGaugeService::TankConfig* tankConfig, TankStatusesList&& tankSavedStatuses,  QObject *parent = nullptr);
     ~Tank();
 
 public slots:
@@ -53,12 +53,13 @@ public slots:
 
 private slots:
     void addStatusEnd();
+    void sendNewStatusesToSave();
 
 signals:
     void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
     void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
     void errorOccurred(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg) const;
-        void sendLogMsg(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg);
+    void sendLogMsg(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg);
     void finished() const;
 
 private:
@@ -68,14 +69,13 @@ private:
     void addStatuses(const LevelGaugeService::TankStatusesList& tankStatuses);
 
     void addStatus(const LevelGaugeService::TankStatus& tankStatus);
+    void addStatus(LevelGaugeService::TankStatus&& tankStatus);
 
     void addStatusesRange(const LevelGaugeService::TankStatus& tankStatus);
     void addStatusesIntake(const LevelGaugeService::TankStatus& tankStatus);
 
     void addRandom(LevelGaugeService::TankStatus* tankStatus) const;
     void checkLimits(LevelGaugeService::TankStatus* tankStatus) const; //провеверяет лимитные ограничения статусов
-
-    void sendNewStatusesToSave();
 
     void clearTankStatuses();
 
@@ -94,11 +94,13 @@ private:
 
     LevelGaugeService::TankStatuses _tankStatuses;
     QDateTime _lastSendToSaveDateTime;
+    QDateTime _lastPumpingOut;
 
     std::optional<QDateTime> _isIntake;
     std::optional<QDateTime> _isPumpingOut;
 
     QTimer* _addEndTimer = nullptr;
+    QTimer* _saveToDBTimer = nullptr;
 
 };
 

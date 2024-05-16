@@ -58,7 +58,10 @@ signals:
     void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
 
 private:
-    bool loadFromCalculatedDB();  //загружает данне о предыдыщих сохранениях из БД
+    using TanksSavedStatuses = std::unordered_map<TankID, TankStatusesList>;
+
+private:
+    TanksSavedStatuses loadFromCalculatedDB();  //загружает данне о предыдыщих сохранениях из БД
     bool loadFromMeasumentsDB();  //загружает новые данные из таблицы измерений
     bool makeTanks();
 

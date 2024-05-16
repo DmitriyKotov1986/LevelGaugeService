@@ -14,6 +14,7 @@ static const int DETECT_STATUS_TIME = 60 * 15; //Время запаздыван
 Sync::Sync(const Common::DBConnectionInfo& dbConnectionInfo, const Common::DBConnectionInfo& dbNitConnectionInfo,
            LevelGaugeService::TanksConfig* tanksConfig, QObject *parent /* = nullptr */)
     : QObject{parent}
+    , _tanksConfig(tanksConfig)
     , _dbConnectionInfo(dbConnectionInfo)
     , _dbNitConnectionInfo(dbNitConnectionInfo)
 {
@@ -63,7 +64,7 @@ void Sync::stop()
 
 void Sync::calculateStatuses(const TankID &id, const TankStatusesList &tankStatuses)
 {
-    Q_ASSERT(tankStatuses.isEmpty());
+    Q_ASSERT(!tankStatuses.empty());
 
     auto tankConfig = _tanksConfig->getTankConfig(id);
     Q_CHECK_PTR(tankConfig);
@@ -117,11 +118,11 @@ void Sync::saveToDB(const LevelGaugeService::TankID& id, const LevelGaugeService
             .arg(id.levelGaugeCode())
             .arg(id.tankNumber())
             .arg(tankStatus.dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))  //переводим время на время АЗС
-            .arg(tankStatus.volume() / 1000.0, 0, 'f', 0) //переводим объем в м3
+            .arg(tankStatus.volume(), 0, 'f', 0) //переводим объем в м3
             .arg(tankConfig->totalVolume() / 1000.0, 0, 'f', 0)   //переводим объем в м3
             .arg(tankStatus.mass(), 0, 'f', 0)
             .arg(tankStatus.density(), 0, 'f', 1)
-            .arg(tankStatus.height() / 10.0, 0, 'f', 1)   //высоту переводм в см
+            .arg(tankStatus.height(), 0, 'f', 1)   //высоту переводм в см
             .arg(tankStatus.temp(), 0, 'f', 1)
             .arg(tankConfig->product())
             .arg(static_cast<quint8>(tankConfig->productStatus()))
@@ -141,6 +142,15 @@ void Sync::saveToDBNitOilDepot(const LevelGaugeService::TankID& id, const LevelG
 {
     const auto tankConfig = _tanksConfig->getTankConfig(id);
     Q_CHECK_PTR(tankConfig);
+
+    if (tankConfig->status() == TankConfig::Status::REPAIR)
+    {
+        emit sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, QString("AZSCode: %1. Tank number: %2. Saving tank status is not required. Skip")
+                        .arg(id.levelGaugeCode())
+                        .arg(id.tankNumber()));
+
+        return;
+    }
 
     //Сохряняем в БД
     const auto queryText =
@@ -173,6 +183,15 @@ void Sync::saveToDBNitAZS(const LevelGaugeService::TankID& id, const LevelGaugeS
     const auto tankConfig = _tanksConfig->getTankConfig(id);
     Q_CHECK_PTR(tankConfig);
 
+    if (tankConfig->status() == TankConfig::Status::REPAIR)
+    {
+        emit sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, QString("AZSCode: %1. Tank number: %2. Saving tank status is not required. Skip")
+                        .arg(id.levelGaugeCode())
+                        .arg(id.tankNumber()));
+
+        return;
+    }
+
     const auto queryText =
         QString("INSERT INTO [%1].[dbo].[TanksStatus] ([DateTime], [AZSCode], [TankNumber], [Product], [Height], [Volume], [Temp], [Density], [Mass]) "
                 "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', %6, %7, %8, %9, %10)")
@@ -202,7 +221,7 @@ quint64 Sync::getLastSavetId(const LevelGaugeService::TankID& id)
     //Сохряняем в БД
     const auto queryText =
         QString("SELECT TOP(1) [ID] "
-                "FROM [dbo].%1 "
+                "FROM [%1].[dbo].[TanksStatus] "
                 "ORDER BY [ID] DESC ")
             .arg(tankConfig->serviceDB());
 
@@ -282,49 +301,56 @@ void Sync::saveIntakesToNIT(const LevelGaugeService::TankID& id, const LevelGaug
     Q_CHECK_PTR(tankConfig);
 
     //сохраняем приход в БД НИТа
-    if (tankConfig->status() != TankConfig::Status::REPAIR)
+    if (tankConfig->status() == TankConfig::Status::REPAIR || tankConfig->mode() != TankConfig::Mode::AZS)
     {
-        _db.transaction();
-        QSqlQuery query(_db);
+        emit sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, QString("AZSCode: %1. Tank number: %2. Saving intace is not required. Skip")
+                        .arg(id.levelGaugeCode())
+                        .arg(id.tankNumber()));
 
-        for (const auto& intake: intakes)
-        {
-            const auto queryText =
-                QString("INSERT INTO [%1].[dbo].[AddProduct] "
-                        "([DateTime], [AZSCode], [TankNumber], [Product], [StartDateTime], [FinishedDateTime], [Height], [Volume], [Temp], [Density], [Mass]) "
-                        "VALUES (CAST('%1' AS DATETIME2), '%2', %3, '%4', CAST('%5' AS DATETIME2), CAST('%6' AS DATETIME2), %7, %8, %9, %10, %11, %12)")
-                    .arg(tankConfig->serviceDB())
-                    .arg(QDateTime::currentDateTime().toString(DATETIME_FORMAT))
-                    .arg(tankConfig->tankId().levelGaugeCode())
-                    .arg(tankConfig->tankId().tankNumber())
-                    .arg(tankConfig->product())
-                    .arg(intake.startTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
-                    .arg(intake.finishTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
-                    .arg(intake.finishTankStatus().height() / 10.0, 0, 'f', 1)
-                    .arg(intake.finishTankStatus().volume(), 0, 'f', 0)
-                    .arg(intake.finishTankStatus().temp(), 0, 'f', 1)
-                    .arg(intake.finishTankStatus().density(), 0, 'f', 1)
-                    .arg(intake.finishTankStatus().mass(), 0, 'f', 0);
+        return;
+    }
 
-            if (!query.exec(queryText))
-            {
-                _db.rollback();
+    _db.transaction();
+    QSqlQuery query(_db);
 
-                emit errorOccurred(EXIT_CODE::LOAD_CONFIG_ERR, QString("Cannot save intake to Nit DB. Error: %1").arg(executeDBErrorString(_db, query)));
+    for (const auto& intake: intakes)
+    {
+        const auto queryText =
+            QString("INSERT INTO [%1].[dbo].[AddProduct] "
+                    "([DateTime], [AZSCode], [TankNumber], [Product], [StartDateTime], [FinishedDateTime], [Height], [Volume], [Temp], [Density], [Mass]) "
+                    "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', CAST('%6' AS DATETIME2), CAST('%7' AS DATETIME2), %8, %9, %10, %11, %12)")
+                .arg(tankConfig->serviceDB())
+                .arg(QDateTime::currentDateTime().toString(DATETIME_FORMAT))
+                .arg(tankConfig->tankId().levelGaugeCode())
+                .arg(tankConfig->tankId().tankNumber())
+                .arg(tankConfig->product())
+                .arg(intake.startTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
+                .arg(intake.finishTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
+                .arg(intake.finishTankStatus().height() / 10.0, 0, 'f', 1)
+                .arg(intake.finishTankStatus().volume(), 0, 'f', 0)
+                .arg(intake.finishTankStatus().temp(), 0, 'f', 1)
+                .arg(intake.finishTankStatus().density(), 0, 'f', 1)
+                .arg(intake.finishTankStatus().mass(), 0, 'f', 0);
 
-                return;
-            }
-        }
-
-        if (!_db.commit())
+        if (!query.exec(queryText))
         {
             _db.rollback();
 
-            emit errorOccurred(EXIT_CODE::SQL_COMMIT_ERR, commitDBErrorString(_db));
+            emit errorOccurred(EXIT_CODE::LOAD_CONFIG_ERR, QString("Cannot save intake to Nit DB. Error: %1").arg(executeDBErrorString(_db, query)));
 
             return;
         }
     }
+
+    if (!_db.commit())
+    {
+        _db.rollback();
+
+        emit errorOccurred(EXIT_CODE::SQL_COMMIT_ERR, commitDBErrorString(_db));
+
+        return;
+    }
+
 }
 
 void Sync::saveIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes)
@@ -344,23 +370,22 @@ void Sync::saveIntakes(const LevelGaugeService::TankID& id, const LevelGaugeServ
             QString("INSERT INTO [dbo].[TanksIntake] "
                     "([DateTime], [AZSCode], [TankNumber], [Product], "
                     " [StartDateTime] ,[StartHeight], [StartVolume], [StartTemp], [StartDensity], [StartMass], "
-                    " [FinishDateTime], [FinishHeight], [FinishStartVolume], [FinishtTemp], [FinishDensity], [FinishMass]) "
+                    " [FinishDateTime], [FinishHeight], [FinishVolume], [FinishtTemp], [FinishDensity], [FinishMass]) "
                     "VALUES (CAST('%1' AS DATETIME2), '%2', %3, '%4', "
-                    " CAST('%5' AS DATETIME2), %6, %7, %8, %9, %10, %11, "
-                    " CAST('%12' AS DATETIME2), %13, %14, %15, %16, %17, %18, "
-                    " %19)")
+                    " CAST('%5' AS DATETIME2), %6, %7, %8, %9, %10, "
+                    " CAST('%11' AS DATETIME2), %12, %13, %14, %15, %16)")
                 .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz"))
                 .arg(tankConfig->tankId().levelGaugeCode())
                 .arg(tankConfig->tankId().tankNumber())
                 .arg(tankConfig->product())
                 .arg(intake.startTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
-                .arg(intake.startTankStatus().height() / 10.0, 0, 'f', 1)
+                .arg(intake.startTankStatus().height(), 0, 'f', 1)
                 .arg(intake.startTankStatus().volume(), 0, 'f', 0)
                 .arg(intake.startTankStatus().temp(), 0, 'f', 1)
                 .arg(intake.startTankStatus().density(), 0, 'f', 1)
                 .arg(intake.startTankStatus().mass(), 0, 'f', 0)
                 .arg(intake.finishTankStatus().dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))
-                .arg(intake.finishTankStatus().height() / 10.0, 0, 'f', 1)
+                .arg(intake.finishTankStatus().height(), 0, 'f', 1)
                 .arg(intake.finishTankStatus().volume(), 0, 'f', 0)
                 .arg(intake.finishTankStatus().temp(), 0, 'f', 1)
                 .arg(intake.finishTankStatus().density(), 0, 'f', 1)

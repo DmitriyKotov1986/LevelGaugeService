@@ -49,7 +49,7 @@ public:
     enum class Status: quint8  //Текущий статус резервуара
     {
         REPAIR = 1,       //Ремонт
-        INTAKE = 2,    //Прием топлива
+        INTAKE = 2,       //Прием топлива
         PUMPING_OUT = 3,  //Откачка топлива
         STUGLE = 4,       //Отстой топлива
         UNDEFINE = 0      //Не определен
@@ -71,7 +71,7 @@ public:
 
     enum class ProductStatus: quint8 //Статус НП (нефтепродуктов)
     {
-        UNPASPORT = 0, //непаспортизированный
+        UNPASPORT = 0,  //непаспортизированный
         PASPORT = 1,    //паспортизированный
         UNDEFINE = 100
     };

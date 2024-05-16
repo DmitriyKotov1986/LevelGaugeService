@@ -17,6 +17,8 @@ using namespace Common;
 
 int main(int argc, char *argv[])
 {
+    qInstallMessageHandler(messageOutput);
+
     QCoreApplication::setApplicationName("LevelGaugeService");
     QCoreApplication::setOrganizationName("OOO 'SA'");
     QCoreApplication::setApplicationVersion(QString("Version:0.2 Build: %1 %2").arg(__DATE__).arg(__TIME__));

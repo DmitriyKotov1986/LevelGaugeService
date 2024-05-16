@@ -77,7 +77,7 @@ void Tanks::stop()
 
 void Tanks::calculateStatusesTank(const TankID &id, const TankStatusesList& tankStatuses)
 {
-    Q_ASSERT(!tankStatuses.isEmpty());
+    Q_ASSERT(!tankStatuses.empty());
 
     emit calculateStatuses(id, tankStatuses);
 }
@@ -110,7 +110,7 @@ void Tanks::checkNewMeasuments()
     loadFromMeasumentsDB();
 }
 
-bool Tanks::loadFromCalculatedDB()
+Tanks::TanksSavedStatuses Tanks::loadFromCalculatedDB()
 {
     Q_ASSERT(_db.isOpen());
 
@@ -139,6 +139,7 @@ bool Tanks::loadFromCalculatedDB()
                 "ORDER BY [DateTime] DESC ")
             .arg(lastSave.toString(DATETIME_FORMAT));
 
+    TanksSavedStatuses result;
 
     if (!query.exec(queryText))
     {
@@ -146,7 +147,7 @@ bool Tanks::loadFromCalculatedDB()
 
         emit errorOccurred(EXIT_CODE::LOAD_CONFIG_ERR, QString("Cannot load tanks statuses from [TanksCalculate]. Error: %1").arg(executeDBErrorString(_db, query)));
 
-        return false;
+        return result;
     }
 
     class TankStatusLoadException
@@ -158,9 +159,8 @@ bool Tanks::loadFromCalculatedDB()
         {}
     };
 
-    QHash<TankID, TankStatusesList> tanksStatuses;
-
     //сохраняем
+    quint64 countStatuses = 0;
     auto lastDateTime = QDateTime::currentDateTime();
     while (query.next())
     {
@@ -189,7 +189,7 @@ bool Tanks::loadFromCalculatedDB()
             TankStatus::TankStatusData tmp;
             tmp.dateTime = query.value("DateTime").toDateTime();
             tmp.density = query.value("Density").toFloat();
-            tmp.height = query.value("Height").toFloat() * 10; //переводим высоту обратно в мм
+            tmp.height = query.value("Height").toFloat(); //высота в мм
             tmp.mass = query.value("Mass").toFloat();
             tmp.temp = query.value("Temp").toFloat();
             tmp.volume = query.value("Volume").toFloat();
@@ -207,12 +207,14 @@ bool Tanks::loadFromCalculatedDB()
             }
 
             TankStatus tankStatus(std::move(tmp));
-            tanksStatuses[id].emplaceBack(std::move(tankStatus));
+            result[id].emplace_back(std::move(tankStatus));
         }
         catch (TankStatusLoadException& err)
         {
             emit sendLogMsg(TDBLoger::MSG_CODE::WARNING_CODE, QString("Cannot load tank status from DB. Tank skipped. Error: %1").arg(err.what()));
         }
+
+        ++countStatuses;
     }
 
     if (!_db.commit())
@@ -221,15 +223,12 @@ bool Tanks::loadFromCalculatedDB()
 
         emit errorOccurred(EXIT_CODE::SQL_COMMIT_ERR, commitDBErrorString(_db));
 
-        return false;
+        return result;
     }
 
-    for (auto tanksStatuses_it = tanksStatuses.begin(); tanksStatuses_it != tanksStatuses.end(); ++tanksStatuses_it)
-    {
-        emit newStatuses(tanksStatuses_it.key(), tanksStatuses_it.value());
-    }
+    emit sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, QString("Load saved statuses from DB [TanksCalculate] complited. Count saved statuses: %1").arg(countStatuses));
 
-    return true;
+    return result;
 }
 
 bool Tanks::loadFromMeasumentsDB()
@@ -289,6 +288,7 @@ bool Tanks::loadFromMeasumentsDB()
     QHash<TankID, TankStatusesList> tanksStatuses;
 
     //сохраняем
+    quint64 countNewStatuses = 0;
     auto lastDateTime = QDateTime::currentDateTime();
     while (query.next())
     {
@@ -318,13 +318,19 @@ bool Tanks::loadFromMeasumentsDB()
             TankStatus::TankStatusData tmp;
             tmp.dateTime = query.value("DateTime").toDateTime();
             tmp.density = query.value("Density").toFloat();
-            tmp.height = query.value("Height").toFloat() * 10; //переводим высоту обратно в мм
+            tmp.height = query.value("Height").toFloat();
             tmp.mass = query.value("Mass").toFloat();
             tmp.temp = query.value("Temp").toFloat();
             tmp.volume = query.value("Volume").toFloat();
             tmp.additionFlag = static_cast<quint8>(TankStatus::AdditionFlag::MEASUMENTS);
             if (tankConfig_p->status() == TankConfig::Status::REPAIR)
-            tmp.status = tankConfig_p->status() != TankConfig::Status::UNDEFINE ? tankConfig_p->status() : TankConfig::Status::STUGLE;
+            {
+                tmp.status = TankConfig::Status::REPAIR;
+            }
+            else
+            {
+                tmp.status = tankConfig_p->status() != TankConfig::Status::UNDEFINE ? tankConfig_p->status() : TankConfig::Status::STUGLE;
+            }
 
             if (!tmp.check())
             {
@@ -337,7 +343,7 @@ bool Tanks::loadFromMeasumentsDB()
             }
 
             TankStatus tankStatus(std::move(tmp));
-            tanksStatuses[id].emplaceBack(std::move(tankStatus));
+            tanksStatuses[id].emplace_back(std::move(tankStatus));
         }
         catch (TankStatusLoadException& err)
         {
@@ -345,6 +351,7 @@ bool Tanks::loadFromMeasumentsDB()
         }
 
         _lastLoadId = std::max(_lastLoadId, recordID);
+        ++countNewStatuses;
     }
 
     if (!_db.commit())
@@ -355,6 +362,8 @@ bool Tanks::loadFromMeasumentsDB()
 
         return false;
     }
+
+    emit sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, QString("Load new statuses from DB [TanksMeasument] complited. Count new statuses: %1").arg(countNewStatuses));
 
     for (auto tanksStatuses_it = tanksStatuses.begin(); tanksStatuses_it != tanksStatuses.end(); ++tanksStatuses_it)
     {
@@ -368,6 +377,8 @@ bool Tanks::makeTanks()
 {
     Q_CHECK_PTR(_tanksConfig);
 
+    auto tanksSavedStatuses = loadFromCalculatedDB();
+
     for (const auto& tankId: _tanksConfig->getTanksID())
     {
         auto tmp = std::make_unique<TankThread>();
@@ -375,7 +386,15 @@ bool Tanks::makeTanks()
         const auto tankConfig_p = _tanksConfig->getTankConfig(tankId);
         Q_CHECK_PTR(tankConfig_p);
 
-        tmp->tank = std::make_unique<Tank>(tankConfig_p);
+        auto tanksSavedStatuses_it = tanksSavedStatuses.find(tankId);
+        if (tanksSavedStatuses_it != tanksSavedStatuses.end())
+        {
+            tmp->tank = std::make_unique<Tank>(tankConfig_p, std::move(tanksSavedStatuses_it->second));
+        }
+        else
+        {
+            tmp->tank = std::make_unique<Tank>(tankConfig_p, TankStatusesList{});
+        }
         tmp->thread = std::make_unique<QThread>();
 
         tmp->tank->moveToThread(tmp->thread.get());
