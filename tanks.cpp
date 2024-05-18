@@ -107,10 +107,18 @@ void Tanks::sendLogMsgTank(const TankID &id, Common::TDBLoger::MSG_CODE category
 
 void Tanks::checkNewMeasuments()
 {
-    loadFromMeasumentsDB();
+    if (loadFromMeasumentsDB() && _isFirstLoadMeasuments)
+    {
+        _isFirstLoadMeasuments = false;
+
+        for (const auto& tankId: _tanksConfig->getTanksID())
+        {
+            emit newStatuses(tankId, {});
+        }
+    }
 }
 
-Tanks::TanksSavedStatuses Tanks::loadFromCalculatedDB()
+Tanks::TanksLoadStatuses Tanks::loadFromCalculatedDB()
 {
     Q_ASSERT(_db.isOpen());
 
@@ -139,7 +147,7 @@ Tanks::TanksSavedStatuses Tanks::loadFromCalculatedDB()
                 "ORDER BY [DateTime] DESC ")
             .arg(lastSave.toString(DATETIME_FORMAT));
 
-    TanksSavedStatuses result;
+    TanksLoadStatuses result;
 
     if (!query.exec(queryText))
     {
@@ -188,6 +196,10 @@ Tanks::TanksSavedStatuses Tanks::loadFromCalculatedDB()
 
             TankStatus::TankStatusData tmp;
             tmp.dateTime = query.value("DateTime").toDateTime();
+            if (tankConfig_p->lastIntake() > tmp.dateTime.addDays(-1))
+            {
+                continue;
+            }
             tmp.density = query.value("Density").toFloat();
             tmp.height = query.value("Height").toFloat(); //высота в мм
             tmp.mass = query.value("Mass").toFloat();
@@ -317,6 +329,11 @@ bool Tanks::loadFromMeasumentsDB()
 
             TankStatus::TankStatusData tmp;
             tmp.dateTime = query.value("DateTime").toDateTime();
+            if (tankConfig_p->lastMeasuments() > tmp.dateTime)
+            {
+                continue;
+            }
+
             tmp.density = query.value("Density").toFloat();
             tmp.height = query.value("Height").toFloat();
             tmp.mass = query.value("Mass").toFloat();

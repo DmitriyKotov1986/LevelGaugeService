@@ -118,11 +118,11 @@ void Sync::saveToDB(const LevelGaugeService::TankID& id, const LevelGaugeService
             .arg(id.levelGaugeCode())
             .arg(id.tankNumber())
             .arg(tankStatus.dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))  //переводим время на время АЗС
-            .arg(tankStatus.volume(), 0, 'f', 0) //переводим объем в м3
-            .arg(tankConfig->totalVolume() / 1000.0, 0, 'f', 0)   //переводим объем в м3
+            .arg(tankStatus.volume(), 0, 'f', 0)
+            .arg(tankConfig->totalVolume(), 0, 'f', 0)
             .arg(tankStatus.mass(), 0, 'f', 0)
             .arg(tankStatus.density(), 0, 'f', 1)
-            .arg(tankStatus.height(), 0, 'f', 1)   //высоту переводм в см
+            .arg(tankStatus.height(), 0, 'f', 1)
             .arg(tankStatus.temp(), 0, 'f', 1)
             .arg(tankConfig->product())
             .arg(static_cast<quint8>(tankConfig->productStatus()))
@@ -155,9 +155,9 @@ void Sync::saveToDBNitOilDepot(const LevelGaugeService::TankID& id, const LevelG
     //Сохряняем в БД
     const auto queryText =
         QString("INSERT INTO [%1].[dbo].[TanksStatus] ("
-                    "[DateTime], [AZSCode], [TankNumber], [TankName], [Type], [Mode], [Product], "
+                    "[DateTime], [AZSCode], [TankNumber], [TankName], [Type], [Status], [Product], "
                     "[ProductStatus], [Height], [Volume], [TotalVolume], [Temp], [Density], [Mass]) "
-                "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', %6, %7, %8, "
+                "VALUES (CAST('%2' AS DATETIME2), '%3', %4, '%5', %6, %7, '%8', "
                     "%9, %10, %11, %12, %13, %14, %15)")
             .arg(tankConfig->serviceDB())
             .arg(tankStatus.dateTime().addSecs(tankConfig->timeShift()).toString(DATETIME_FORMAT))  //переводим время на время АЗС
@@ -165,7 +165,7 @@ void Sync::saveToDBNitOilDepot(const LevelGaugeService::TankID& id, const LevelG
             .arg(id.tankNumber())
             .arg(tankConfig->name())
             .arg(static_cast<quint8>(tankConfig->type()))
-            .arg(static_cast<quint8>(tankConfig->mode()))
+            .arg(static_cast<quint8>(tankConfig->status()))
             .arg(tankConfig->product())
             .arg(static_cast<quint8>(tankConfig->productStatus()))
             .arg(tankStatus.height() / 10.0, 0, 'f', 1)   //высоту переводм в см
@@ -173,7 +173,7 @@ void Sync::saveToDBNitOilDepot(const LevelGaugeService::TankID& id, const LevelG
             .arg(tankConfig->totalVolume() / 1000.0, 0, 'f', 0)   //переводим объем в м3
             .arg(tankStatus.temp(), 0, 'f', 1)
             .arg(tankStatus.density(), 0, 'f', 1)
-            .arg(tankStatus.mass(), 0, 'f', 0);
+            .arg(tankStatus.mass() / 1000, 0, 'f', 0); //переводим в тонны
 
     executeDBQuery(_dbNit, queryText);
 }
