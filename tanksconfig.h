@@ -1,5 +1,4 @@
-#ifndef TANKSCONFIG_H
-#define TANKSCONFIG_H
+#pragma once
 
 //STL
 #include <memory>
@@ -63,4 +62,3 @@ private:
 
 } //namespace LevelGaugeService
 
-#endif // TANKSCONFIG_H

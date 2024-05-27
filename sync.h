@@ -4,8 +4,7 @@
 // БД АО НИТ
 //
 //*****************************************************************************
-#ifndef SYNC_H
-#define SYNC_H
+#pragma once
 
 //STL
 #include <queue>
@@ -79,4 +78,4 @@ private:
 
 } //namespace LevelGaugeService
 
-#endif // SYNC_H
+

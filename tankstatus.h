@@ -1,5 +1,4 @@
-#ifndef TANKSTATUS_H
-#define TANKSTATUS_H
+#pragma once
 
 //QT
 #include <QObject>
@@ -87,5 +86,3 @@ private:
 }; //class TankStatus
 
 } //namespace LevelGaugeService
-
-#endif // TANKSTATUS_H

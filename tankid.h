@@ -1,5 +1,4 @@
-#ifndef TANKID_H
-#define TANKID_H
+#pragma once
 
 //STL
 #include "unordered_map"
@@ -52,4 +51,3 @@ struct std::hash<LevelGaugeService::TankID>
 
 Q_DECLARE_METATYPE(LevelGaugeService::TankID)
 
-#endif // TANKID_H

@@ -1,5 +1,4 @@
-#ifndef TCONFIG_H
-#define TCONFIG_H
+#pragma once
 
 //QT
 #include <QString>
@@ -24,6 +23,7 @@ public:
 
     //[DATABASE]
     const Common::DBConnectionInfo& dbConnectionInfo() const { return _dbConnectionInfo; };
+
     //[NIT_DATABASE]
     const Common::DBConnectionInfo& dbNitConnectionInfo() const { return _dbNitConnectionInfo; };
 
@@ -49,6 +49,5 @@ private:
     bool _sys_DebugMode = false;
 
 };
-} //namespace RegService
 
-#endif // TCONFIG_H
+} //namespace RegService

@@ -1,9 +1,10 @@
-#include "tconfig.h"
-
+//QT
 #include <QSettings>
 #include <QFileInfo>
 #include <QDebug>
 #include <QFileInfo>
+
+#include "tconfig.h"
 
 using namespace  LevelGaugeService;
 using namespace Common;
@@ -69,7 +70,19 @@ TConfig::TConfig(const QString& configFileName) :
     //Database
     ini.beginGroup("DATABASE");
     _dbConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
+    if (_dbConnectionInfo.db_Driver.isEmpty())
+    {
+        _errorString = "Key value [DATABASE]/Driver cannot be empty";
+
+        return;
+    }
     _dbConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
+    if (_dbConnectionInfo.db_DBName.isEmpty())
+    {
+        _errorString = "Key value [DATABASE]/DB cannot be empty";
+
+        return;
+    }
     _dbConnectionInfo.db_UserName = ini.value("UID", "").toString();
     _dbConnectionInfo.db_Password = ini.value("PWD", "").toString();
     _dbConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();
@@ -79,8 +92,21 @@ TConfig::TConfig(const QString& configFileName) :
 
     //AO Nit Database
     ini.beginGroup("NIT_DATABASE");
+
     _dbNitConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
+    if (_dbNitConnectionInfo.db_Driver.isEmpty())
+    {
+        _errorString = "Key value [NIT_DATABASE]/Driver cannot be empty";
+
+        return;
+    }
     _dbNitConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
+    if (_dbNitConnectionInfo.db_DBName.isEmpty())
+    {
+        _errorString = "Key value [NIT_DATABASE]/DB cannot be empty";
+
+        return;
+    }
     _dbNitConnectionInfo.db_UserName = ini.value("UID", "").toString();
     _dbNitConnectionInfo.db_Password = ini.value("PWD", "").toString();
     _dbNitConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();

@@ -1,5 +1,4 @@
-#ifndef TANK_H
-#define TANK_H
+#pragma once
 
 //STL
 #include <map>
@@ -104,55 +103,4 @@ private:
 
 };
 
-/*
-
-
-
-
-
-private slots:
-    void calculate();
-
-signals:
-    void addStatusForSync(const LevelGaugeService::TankID& id,const QDateTime dateTime, const TankStatuses::TankStatus& status) const;
-    void errorOccurred(const QString& msg);
-    void finished();
-
-private:
-    void dbCommit();
-    void errorDBQuery(const QSqlQuery& query);
-    void dbQueryExecute(QSqlQuery &query, const QString &queryText);
-
-    void loadTankConfig();
-
-    void initFromSave();
-    void loadFromMeasument();
-    void makeResultStatus();         //
-    void statusDetect();
- //   void checkLimits(TankStatuses::TankStatusesIterator start_it);         //провеверяет лимитные ограничения статусов
-    void addStatusRange(const QDateTime& targetDateTime, const TankStatuses::TankStatus& targetStatus);
-    void addStatusIntake(const TankStatuses::TankStatus& targetStatus);
-    void addStatusEnd();
- //   void addRandom(TankStatuses::TankStatusesIterator it);
-    void sendNewStatuses();
-
-
-private:
-    const TankID _id;
-
-    TankConfig _tankConfig; //Конфигурация резервуар
-    TankStatuses _tankResultStatuses; //карта результирующих состояний
-    TankStatuses _tankTargetStatuses; //карта целевых состояний
-
-    QSqlDatabase _db;
-    const Common::DBConnectionInfo _dbConnectionInfo;
-    const QString _dbConnectionName;
-
-    QTimer* _timer = nullptr;
-
-
-};
-*/
 } //namespace LevelGaugeService
-
-#endif // TANK_H

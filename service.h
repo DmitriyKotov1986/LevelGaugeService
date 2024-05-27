@@ -1,5 +1,4 @@
-#ifndef SERVICE_H
-#define SERVICE_H
+#pragma once
 
 //Qt
 #include <QString>
@@ -56,4 +55,3 @@ private:
 
 } // namespace LevelGaugeService
 
-#endif // SERVICE_H

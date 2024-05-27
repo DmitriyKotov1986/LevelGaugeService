@@ -1,5 +1,4 @@
-#ifndef CORE_H
-#define CORE_H
+#pragma once
 
 //STL
 #include <memory>
@@ -77,4 +76,3 @@ private:
 
 } // namespace LevelGaugeService
 
-#endif // CORE_H

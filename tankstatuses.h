@@ -1,5 +1,4 @@
-#ifndef TANKSTATUSES_H
-#define TANKSTATUSES_H
+#pragma once
 
 //STL
 #include <memory>
@@ -16,8 +15,8 @@ namespace LevelGaugeService
 {
     using TankStatuses = std::map<QDateTime, std::unique_ptr<TankStatus>>;
     using TankStatusesList = std::list<TankStatus>;
+
 } //namespace LevelGaugeService
 
 Q_DECLARE_METATYPE(LevelGaugeService::TankStatusesList);
 
-#endif // TANKSTATUSES_H

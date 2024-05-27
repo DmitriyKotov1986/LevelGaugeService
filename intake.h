@@ -1,5 +1,4 @@
-#ifndef INTAKE_H
-#define INTAKE_H
+#pragma once
 
 //STL
 #include <list>
@@ -38,4 +37,3 @@ using IntakesList = std::list<Intake>;
 
 Q_DECLARE_METATYPE(LevelGaugeService::IntakesList);
 
-#endif // INTAKE_H

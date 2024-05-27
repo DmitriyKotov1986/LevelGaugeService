@@ -1,5 +1,4 @@
-#ifndef TANKCONFIG_H
-#define TANKCONFIG_H
+#pragma once
 
 //QT
 #include <QObject>
@@ -167,4 +166,3 @@ private:
 
 } //namespace LevelGaugeService
 
-#endif // TANKCONFIG_H
