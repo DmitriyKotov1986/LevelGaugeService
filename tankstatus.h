@@ -3,6 +3,7 @@
 //QT
 #include <QObject>
 #include <QDateTime>
+#include <QUuid>
 
 //My
 #include "tankconfig.h"
@@ -56,7 +57,7 @@ public:
 
     const TankStatusData& getTankStatusData() const;
 
-    QDateTime dateTime() const;
+    const QDateTime& dateTime() const;
     void setDateTime(const QDateTime& dateTime);
 
     float volume() const;
@@ -80,9 +81,11 @@ public:
     quint8 additionFlag() const;
     void setAdditionFlag(quint8 additionFlag);
 
+    bool operator<(const TankStatus& status) const;
+
 private:
     TankStatusData _tankStatusData;
 
-}; //class TankStatus
+};   //class TankStatus
 
 } //namespace LevelGaugeService

@@ -29,4 +29,9 @@ bool TankID::operator==(const TankID& other) const
     return (_tankNumber == other._tankNumber) && (_levelGaugeCode == other._levelGaugeCode);
 }
 
+QString TankID::toString() const
+{
+    return QString("%1/%2").arg(_levelGaugeCode).arg(_tankNumber);
+}
+
 

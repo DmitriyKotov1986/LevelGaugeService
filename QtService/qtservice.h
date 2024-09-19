@@ -162,7 +162,7 @@ template <typename Application>
 class QtService : public QtServiceBase
 {
 public:
-    QtService(int argc, char **argv, const QString &name)
+    QtService(int& argc, char **argv, const QString &name)
         : QtServiceBase(argc, argv, name)
     {
         createApplication(argc, argv);

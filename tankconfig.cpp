@@ -73,12 +73,20 @@ TankConfig::ProductStatus TankConfig::intToProductStatus(quint8 productStatus)
 }
 
 //class
-TankConfig::TankConfig(const TankID& id, const QString& name, float totalVolume, float diametr, qint64 timeShift, Mode mode, Type type,
-                       const Delta& deltaMax, const Delta& deltaIntake, float deltaIntakeHeight, float deltaPumpingOutHeight, Status status, const QString& serviceDB, const QString& product,
-                       ProductStatus productStatus, const QDateTime& lastMeasuments, const QDateTime& lastSave, const QDateTime& lastIntake, QObject* parent /* = nullptr */)
+TankConfig::TankConfig(const TankID& id,
+                       const qint64 remoteApplicantId, const qint64 remoteObjectId, const qint64 remoteTankId, const QString& name, const QString& remoteBearerToken, const QUrl& remoteBaseUrl,
+                       float totalVolume, float diametr, qint64 timeShift, Mode mode, Type type,
+                       const Delta& deltaMax, const Delta& deltaIntake, float deltaIntakeHeight, float deltaPumpingOutHeight, Status status,
+                       const QString& product, ProductStatus productStatus,
+                       QObject* parent /* = nullptr */)
     : QObject{parent}
     , _id(id)
+    , _remoteApplicantId(remoteApplicantId)
+    , _remoteObjectId(remoteObjectId)
+    , _remoteTankId(remoteTankId)
     , _name(name)
+    , _remoteBearerToken(remoteBearerToken)
+    , _remoteBaseUrl(remoteBaseUrl)
     , _totalVolume(totalVolume)
     , _diametr(diametr)
     , _timeShift(timeShift)
@@ -89,23 +97,23 @@ TankConfig::TankConfig(const TankID& id, const QString& name, float totalVolume,
     , _status(status)
     , _mode(mode)
     , _type(type)
-    , _serviceDB(serviceDB)
     , _product(product)
     , _productStatus(productStatus)
-    , _lastMeasuments(lastMeasuments)
-    , _lastSave(lastSave)
-    , _lastIntake(lastIntake)
 {
     Q_ASSERT(_id.tankNumber() != 0);
+    Q_ASSERT(_remoteApplicantId != 0);
+    Q_ASSERT(_remoteObjectId != 0);
+    Q_ASSERT(_remoteTankId != 0);
     Q_ASSERT(!_id.levelGaugeCode().isEmpty());
     Q_ASSERT(!_name.isEmpty());
-    Q_ASSERT(_totalVolume > 0.0);
-    Q_ASSERT(_diametr > 0.0);
-    Q_ASSERT(_deltaMax.checkDelta());
-    Q_ASSERT(_deltaIntake.checkDelta());
-    Q_ASSERT(_deltaIntakeHeight > 0.0);
-    Q_ASSERT(_deltaPumpingOutHeight > 0.0);
-    Q_ASSERT(!_serviceDB.isEmpty());
+    Q_ASSERT(!_remoteBearerToken.isEmpty());
+    Q_ASSERT(!_remoteBaseUrl.isEmpty() && _remoteBaseUrl.isValid());
+    Q_ASSERT(_totalVolume > 0.0f);
+    Q_ASSERT(_diametr > 0.0f);
+    Q_ASSERT(_deltaMax.check());
+    Q_ASSERT(_deltaIntake.check());
+    Q_ASSERT(_deltaIntakeHeight > 0.0f);
+    Q_ASSERT(_deltaPumpingOutHeight > 0.0f);
     Q_ASSERT(!_product.isEmpty());
     Q_ASSERT(_type != Type::UNDEFINE);
     Q_ASSERT(_mode != Mode::UNDEFINE);
@@ -117,11 +125,11 @@ TankConfig::TankConfig(const TankID& id, const QString& name, float totalVolume,
 
 void TankConfig::makeLimits()
 {
-    _limits.density = std::make_pair<float>(350.0, 1200.0);
-    _limits.height  = std::make_pair<float>(0.0, _diametr);
-    _limits.mass    = std::make_pair<float>(0.0, _totalVolume * _limits.density.second);
-    _limits.volume  = std::make_pair<float>(0.0, _totalVolume);
-    _limits.temp    = std::make_pair<float>(-50.0, 100.0);
+    _limits.density = std::make_pair<float>(350.0f, 1200.0f);
+    _limits.height  = std::make_pair<float>(0.0f, _diametr);
+    _limits.mass    = std::make_pair<float>(0.0f, _totalVolume * _limits.density.second);
+    _limits.volume  = std::make_pair<float>(0.0f, _totalVolume);
+    _limits.temp    = std::make_pair<float>(-50.0f, 100.0f);
 }
 
 const TankID &TankConfig::tankId() const
@@ -129,9 +137,34 @@ const TankID &TankConfig::tankId() const
     return _id;
 }
 
+qint64 TankConfig::remoteTankId() const
+{
+    return _remoteTankId;
+}
+
+qint64 TankConfig::remoteObjectId() const
+{
+    return _remoteObjectId;
+}
+
+qint64 TankConfig::remoteApplicantId() const
+{
+    return _remoteApplicantId;
+}
+
 const QString& TankConfig::name() const
 {
     return _name;
+}
+
+const QString &TankConfig::remoteBearerToken() const
+{
+    return _remoteBearerToken;
+}
+
+const QUrl &TankConfig::remoteBaseUrl() const
+{
+    return _remoteBaseUrl;
 }
 
 float TankConfig::totalVolume() const
@@ -189,11 +222,6 @@ TankConfig::Type TankConfig::type() const
     return _type;
 }
 
-const QString &TankConfig::serviceDB() const
-{
-    return _serviceDB;
-}
-
 const QString &TankConfig::product() const
 {
     return _product;
@@ -240,6 +268,24 @@ void TankConfig::setLastSave(const QDateTime &lastTime)
     emit lastSave(_id, lastTime);
 }
 
+const QDateTime &TankConfig::lastSend() const
+{
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    return _lastSend;
+}
+
+void TankConfig::setLastSend(const QDateTime &lastTime)
+{
+    Q_ASSERT(_lastSend <= lastTime);
+
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    _lastSend = lastTime;
+
+    emit lastSend(_id, lastTime);
+}
+
 const QDateTime &TankConfig::lastIntake() const
 {
     QMutexLocker<QMutex> locker(&lastTimeMutex);
@@ -256,4 +302,22 @@ void TankConfig::setLastIntake(const QDateTime &lastTime)
     _lastIntake = lastTime;
 
     emit lastIntake(_id, lastTime);
+}
+
+const QDateTime &TankConfig::lastSendIntake() const
+{
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    return _lastSendIntake;
+}
+
+void TankConfig::setLastSendIntake(const QDateTime &lastTime)
+{
+    Q_ASSERT(_lastSendIntake <= lastTime);
+
+    QMutexLocker<QMutex> locker(&lastTimeMutex);
+
+    _lastSendIntake = lastTime;
+
+    emit lastSendIntake(_id, lastTime);
 }

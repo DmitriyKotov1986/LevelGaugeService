@@ -25,50 +25,81 @@
 namespace LevelGaugeService
 {
 
-class TankTest;
-
 class Tank
     : public QObject
 {
     Q_OBJECT
 
-    friend TankTest;    
-
 public:   
-    Tank() = delete;
-    Tank(const Tank&) = delete;
-    Tank& operator =(const Tank&) = delete;
-    Tank(const Tank&&) = delete;
-    Tank& operator =(const Tank&&) = delete;
-
-    Tank(const LevelGaugeService::TankConfig* tankConfig, TankStatusesList&& tankSavedStatuses,  QObject *parent = nullptr);
+    /*!
+        Конструктор. Планируеться использовать только такой конструктор
+        @param dbConnectionInfo - параметры подключения к БД
+        @param tankConfig - конфигурация резервуара
+        @param tankSavedStatuse - сохраненные, но не обработанные статусы
+        @param parent - указатаель на родительский класс
+    */
+    Tank(const LevelGaugeService::TankConfig* tankConfig, const TankStatusesList& tankSavedStatuses, QObject* parent = nullptr);
     ~Tank();
 
 public slots:
     void start();
     void stop();
 
+    /*!
+        Получает новые статусы резервуара из таблицы измерений
+        @param id - ИД резервуара
+        @param tankStatuses - список новых статусов
+    */
     void newStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
 
 private slots:
     void addStatusEnd();
     void sendNewStatusesToSave();
 
+    /*!
+        Фатальная ошибка синхронизации
+        @param code - код ошибки
+        @param msg - текстовое описание
+    */
+    void errorOccurredSync(Common::EXIT_CODE code , const QString& msg);
+
+    /*!
+        Передача сообщения в лог от синхронизатора
+        @param code - код ошибки
+        @param msg - текстовое описание
+    */
+    void sendLogMsgSync(Common::TDBLoger::MSG_CODE code, const QString& msg);
+
 signals:
-    void calculateStatuses(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatusesList& tankStatuses);
-    void calculateIntakes(const LevelGaugeService::TankID& id, const LevelGaugeService::IntakesList& intakes);
-    void errorOccurred(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg) const;
+    void calculateStatuses(const LevelGaugeService::TankID& id, const TankStatusesList &tankStatuses);
+    void calculateIntakes(const LevelGaugeService::TankID& id, const IntakesList &intakes);
+
+    /*!
+        Фатальная ошибка обработки данных резервуаров
+        @param id - ИД резервуара
+        @param errorCode - код ошибки
+        @param msg - текстовое описание
+    */
+    void errorOccurred(const LevelGaugeService::TankID& id, Common::EXIT_CODE errorCode, const QString& msg);
+
+
     void sendLogMsg(const LevelGaugeService::TankID& id, Common::TDBLoger::MSG_CODE category, const QString &msg);
-    void finished() const;
+
+
+    void finished();
+    void started(const LevelGaugeService::TankID& id);
 
 private:
     using TankStatusesIterator =  LevelGaugeService::TankStatuses::iterator;
 
 private:
+    // Удаляем неиспользуемые конструкторы
+    Tank() = delete;
+    Q_DISABLE_COPY_MOVE(Tank)
+
     void addStatuses(const LevelGaugeService::TankStatusesList& tankStatuses);
 
     void addStatus(const LevelGaugeService::TankStatus& tankStatus);
-    void addStatus(LevelGaugeService::TankStatus&& tankStatus);
 
     void addStatusesRange(const LevelGaugeService::TankStatus& tankStatus);
     void addStatusesIntake(const LevelGaugeService::TankStatus& tankStatus);
@@ -87,7 +118,7 @@ private:
     void findPumpingOut();
 
 private:
-    const LevelGaugeService::TankConfig* _tankConfig = nullptr; //Конфигурация резервуар
+    const LevelGaugeService::TankConfig* _tankConfig; //Конфигурация резервуар
 
     QRandomGenerator* _rg = nullptr;  //генератор случайных чисел для имитации разброса параметров при измерении в случае подстановки
 
@@ -98,8 +129,9 @@ private:
     std::optional<QDateTime> _isIntake;
     std::optional<QDateTime> _isPumpingOut;
 
-    QTimer* _addEndTimer = nullptr;
     QTimer* _saveToDBTimer = nullptr;
+
+     bool _isStarted = false;
 
 };
 

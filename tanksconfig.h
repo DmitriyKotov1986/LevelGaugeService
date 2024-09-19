@@ -25,20 +25,20 @@ class TanksConfig
     Q_OBJECT
 
 public:
-    TanksConfig() = delete;
-    TanksConfig(const TanksConfig&) = delete;
-    TanksConfig& operator=(const TanksConfig&) = delete;
-    TanksConfig(TanksConfig&&) = delete;
-    TanksConfig& operator=(TanksConfig&&) = delete;
-
-    explicit TanksConfig(const Common::DBConnectionInfo dbConnectionInfo, QObject* parent = nullptr);
+    explicit TanksConfig(const Common::DBConnectionInfo& dbConnectionInfo, QObject* parent = nullptr);
     ~TanksConfig();
 
     bool loadFromDB();
 
-    TankConfig* getTankConfig(const LevelGaugeService::TankID& id) const;
+    bool checkID(const LevelGaugeService::TankID& id) const;
+
+    TankConfig* getTankConfig(const LevelGaugeService::TankID& id);
+
     TankIDList getTanksID() const;
+
     bool isExist(const LevelGaugeService::TankID& id) const;
+
+    quint64 tanksCount() const;
 
 signals:
     void errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString);
@@ -48,8 +48,13 @@ private slots:
     void lastMeasuments(const TankID& id, const QDateTime& lastTime);
     void lastSave(const TankID& id, const QDateTime& lastTime);
     void lastIntake(const TankID& id, const QDateTime& lastTime);
+    void lastSend(const TankID& id, const QDateTime& lastTime);
+    void lastSendIntake(const TankID& id, const QDateTime& lastTime);
 
 private:
+    TanksConfig() = delete;
+    Q_DISABLE_COPY_MOVE(TanksConfig)
+
     void lastUpdate(const QString& fieldName, const TankID &id, const QDateTime &lastTime);
 
 private:

@@ -1,3 +1,9 @@
+///////////////////////////////////////////////////////////////////////////////
+/// Класс ядра. Управляет созданием и удалением объект, обработкой и
+///     сохранением логов и начальной загрузкой
+///
+/// (с) Dmitriy Kotov, 2024
+///////////////////////////////////////////////////////////////////////////////
 #pragma once
 
 //STL
@@ -12,25 +18,26 @@
 //My
 #include "Common/tdbloger.h"
 #include "tconfig.h"
-#include "tankconfig.h"
 #include "tanks.h"
 #include "sync.h"
 
 namespace LevelGaugeService
 {
 
+////////////////////////////////////////////////////////////////////////////////
+/// Класс ядра
+///
 class Core
     : public QObject
 {
     Q_OBJECT
 
 public:
-    Core(const Core&) = delete;
-    Core& operator =(const Core&) = delete;
-    Core(const Core&&) = delete;
-    Core& operator =(const Core&&) = delete;
-
     explicit Core(QObject *parent = nullptr);
+
+    /*!
+        Деструктор
+    */
     ~Core();
 
     void start();
@@ -38,7 +45,6 @@ public:
 
 signals:
     void errorOccurred(Common::EXIT_CODE errorCode, const QString& errorString);
-    void stopAll();
 
 private slots:
     void errorOccurredTankConfig(Common::EXIT_CODE errorCode, const QString& errorString);
@@ -46,33 +52,21 @@ private slots:
     void errorOccurredSync(Common::EXIT_CODE errorCode, const QString& errorString);
 
 private:
+    Q_DISABLE_COPY_MOVE(Core)
+
     bool startTankConfig();
-    bool startTanks();
     bool startSync();
+    bool startTanks();
 
 private:
-    TConfig* _cnf = nullptr;
-    Common::TDBLoger* _loger = nullptr;
+    TConfig* _cnf = nullptr;            ///< Глобальная конфигурация
+    Common::TDBLoger* _loger = nullptr; ///< Глобальны логер
 
-    std::unique_ptr<TanksConfig> _tanksConfig;  //список конфигураций резервуаров
+    std::unique_ptr<TanksConfig> _tanksConfig;  ///< конфигурация резервуаров
+    std::unique_ptr<Tanks> _tanks; ///< Список резервуаров
+    std::unique_ptr<Sync> _sync;
 
-    struct TanksThread
-    {
-        std::unique_ptr<QThread> thread;
-        std::unique_ptr<LevelGaugeService::Tanks> tanks;
-    };
-
-    std::unique_ptr<TanksThread> _tanks;
-
-    struct SyncThread
-    {
-        std::unique_ptr<QThread> thread;
-        std::unique_ptr<LevelGaugeService::Sync> sync;
-    };
-
-    std::unique_ptr<SyncThread> _sync; //поток синхронизации с БД АО НИТ
-
-};
+}; // class Core
 
 } // namespace LevelGaugeService
 

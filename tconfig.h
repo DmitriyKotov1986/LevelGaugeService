@@ -8,13 +8,16 @@
 namespace LevelGaugeService
 {
 
-class TConfig
+class TConfig final
 {
 public:
     static TConfig* config(const QString& configFileName = "");
     static void deleteConfig();
 
 private:
+    TConfig() = delete;
+    Q_DISABLE_COPY_MOVE(TConfig)
+
     explicit TConfig(const QString& configFileName);
     ~TConfig();
 
@@ -23,9 +26,6 @@ public:
 
     //[DATABASE]
     const Common::DBConnectionInfo& dbConnectionInfo() const { return _dbConnectionInfo; };
-
-    //[NIT_DATABASE]
-    const Common::DBConnectionInfo& dbNitConnectionInfo() const { return _dbNitConnectionInfo; };
 
     //[SYSTEM]
     bool sys_DebugMode() const { return _sys_DebugMode; }
@@ -41,9 +41,6 @@ private:
 
     //[DATABASE]
     Common::DBConnectionInfo _dbConnectionInfo;
-
-    //[NIT_DATABASE]
-    Common::DBConnectionInfo _dbNitConnectionInfo;
 
     //[SYSTEM]
     bool _sys_DebugMode = false;

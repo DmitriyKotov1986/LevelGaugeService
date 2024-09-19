@@ -25,13 +25,9 @@ TConfig* TConfig::config(const QString& configFileName)
 
 void TConfig::deleteConfig()
 {
-    Q_CHECK_PTR(configPtr);
+    delete configPtr;
 
-    if (configPtr != nullptr)
-    {
-        delete configPtr;
-        configPtr = nullptr;
-    }
+    configPtr = nullptr;
 }
 
 //public
@@ -44,12 +40,12 @@ TConfig::TConfig(const QString& configFileName) :
         return;
     }
     if (!QFileInfo::exists(_configFileName)) {
-        _errorString = "Configuration file not exist. File name: " + _configFileName;
+        _errorString = QString("Configuration file not exist. File name: %1").arg(_configFileName);
 
         return;
     }
 
-    qDebug() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg("Reading configuration from " +  _configFileName);
+    qDebug() << QString("Reading configuration from %1").arg(_configFileName);
 
     QSettings ini(_configFileName, QSettings::IniFormat);
 
@@ -57,12 +53,6 @@ TConfig::TConfig(const QString& configFileName) :
     if (!groups.contains("DATABASE"))
     {
         _errorString = "Configuration file not contains [DATABASE] group";
-
-        return;
-    }
-    if (!groups.contains("NIT_DATABASE"))
-    {
-        _errorString = "Configuration file not contains [NIT_DATABASE] group";
 
         return;
     }
@@ -90,30 +80,6 @@ TConfig::TConfig(const QString& configFileName) :
     _dbConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
     ini.endGroup();
 
-    //AO Nit Database
-    ini.beginGroup("NIT_DATABASE");
-
-    _dbNitConnectionInfo.db_Driver = ini.value("Driver", "QODBC").toString();
-    if (_dbNitConnectionInfo.db_Driver.isEmpty())
-    {
-        _errorString = "Key value [NIT_DATABASE]/Driver cannot be empty";
-
-        return;
-    }
-    _dbNitConnectionInfo.db_DBName = ini.value("DataBase", "DB").toString();
-    if (_dbNitConnectionInfo.db_DBName.isEmpty())
-    {
-        _errorString = "Key value [NIT_DATABASE]/DB cannot be empty";
-
-        return;
-    }
-    _dbNitConnectionInfo.db_UserName = ini.value("UID", "").toString();
-    _dbNitConnectionInfo.db_Password = ini.value("PWD", "").toString();
-    _dbNitConnectionInfo.db_ConnectOptions = ini.value("ConnectionOptions", "").toString();
-    _dbNitConnectionInfo.db_Port = ini.value("Port", "").toUInt();
-    _dbNitConnectionInfo.db_Host = ini.value("Host", "localhost").toString();
-    ini.endGroup();
-
     //System
     ini.beginGroup("SYSTEM");
 
@@ -124,7 +90,10 @@ TConfig::TConfig(const QString& configFileName) :
 
 TConfig::~TConfig()
 {
-   save();
+    if (!isError())
+    {
+        save();
+    }
 }
 
 bool TConfig::save()
@@ -154,21 +123,6 @@ bool TConfig::save()
 
     ini.endGroup();
 
-    //Database
-    ini.beginGroup("NIT_DATABASE");
-
-    ini.remove("");
-
-    ini.setValue("Driver", _dbNitConnectionInfo.db_Driver);
-    ini.setValue("DataBase", _dbNitConnectionInfo.db_DBName);
-    ini.setValue("UID", _dbNitConnectionInfo.db_UserName);
-    ini.setValue("PWD", _dbNitConnectionInfo.db_Password);
-    ini.setValue("ConnectionOprions", _dbNitConnectionInfo.db_ConnectOptions);
-    ini.setValue("Port", _dbNitConnectionInfo.db_Port);
-    ini.setValue("Host", _dbNitConnectionInfo.db_Host);
-
-    ini.endGroup();
-
     //System
     ini.beginGroup("SYSTEM");
 
@@ -183,7 +137,7 @@ bool TConfig::save()
 
     if (_sys_DebugMode)
     {
-        qDebug() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg("Save configuration to " +  _configFileName);
+        qDebug() << QString("Save configuration to %1").arg(_configFileName);
     }
 
     return true;

@@ -18,6 +18,9 @@ public:
     Intake(const LevelGaugeService::TankID& id, const LevelGaugeService::TankStatus& startTankStatus,
            const LevelGaugeService::TankStatus& finishTankStatus);
 
+    /*!
+        Деструктор
+    */
     ~Intake();
 
     const LevelGaugeService::TankID id() const;
@@ -25,9 +28,9 @@ public:
     const LevelGaugeService::TankStatus& finishTankStatus() const;
 
 private:
-   const LevelGaugeService::TankID _id;
-   const LevelGaugeService::TankStatus _startTankStatus;
-   const LevelGaugeService::TankStatus _finishTankStatus;
+    const LevelGaugeService::TankID _id;
+    const LevelGaugeService::TankStatus _startTankStatus;
+    const LevelGaugeService::TankStatus _finishTankStatus;
 
 }; //class Intake
 

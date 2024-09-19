@@ -38,7 +38,7 @@ QString TankStatus::additionFlagToString(quint8 flag)
 
 //class
 TankStatus::TankStatus()
-{
+{  
 }
 
 TankStatus::~TankStatus()
@@ -60,7 +60,7 @@ const TankStatus::TankStatusData &TankStatus::getTankStatusData() const
     return _tankStatusData;
 }
 
-QDateTime TankStatus::dateTime() const
+const QDateTime& TankStatus::dateTime() const
 {
     return _tankStatusData.dateTime;
 }
@@ -150,5 +150,10 @@ quint8 TankStatus::additionFlag() const
 void TankStatus::setAdditionFlag(quint8 additionFlag)
 {
     _tankStatusData.additionFlag = additionFlag;
+}
+
+bool TankStatus::operator<(const TankStatus &status) const
+{
+    return dateTime() < status.dateTime();
 }
 

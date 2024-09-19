@@ -12,33 +12,22 @@
 using namespace LevelGaugeService;
 using namespace Common;
 
-Service::Service(int argc, char **argv)
+Service::Service(int& argc, char **argv)
     : QObject{nullptr}
     , QtService<QCoreApplication>(argc, argv, "LevelGaugeService")
     , _cnf(TConfig::config())
+    , _loger(Common::TDBLoger::DBLoger())
 
 {
     Q_CHECK_PTR(_cnf);
+    Q_CHECK_PTR(_loger);
 
     setServiceDescription("LevelGaugeService");
     setServiceFlags(QtServiceBase::CanBeSuspended);
 
-    //настраиваем подключение БД логирования
-    _loger = Common::TDBLoger::DBLoger(_cnf->dbConnectionInfo(), "LevelGaugeServiceLog", _cnf->sys_DebugMode());
-
     QObject::connect(_loger, SIGNAL(errorOccurred(Common::EXIT_CODE, const QString&)),
-                     SLOT(errorOccurredLoger(Common::EXIT_CODE, const QString&)));
+                     SLOT(errorOccurredLoger(Common::EXIT_CODE, const QString&)), Qt::DirectConnection);
 
-    _loger->start();
-
-    if (_loger->isError())
-    {
-        QString msg = QString("Loger initialization error. Error: %1").arg(_loger->errorString());
-        qCritical() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg(msg);
-        writeLogFile("ERR>", msg);
-
-        exit(EXIT_CODE::START_LOGGER_ERR); // -1
-    }
 }
 
 Service::~Service()
@@ -50,7 +39,7 @@ Service::~Service()
 
     if (_loger != nullptr)
     {
-        _loger->sendLogMsg(TDBLoger::MSG_CODE::OK_CODE, "Successfully finished");
+        _loger->sendLogMsg(TDBLoger::MSG_CODE::INFORMATION_CODE, "Successfully finished");
 
         TDBLoger::deleteDBLoger();
     }
@@ -91,9 +80,10 @@ void Service::start()
     }
     catch (const std::exception &e)
     {
-        _loger->sendLogMsg(TDBLoger::MSG_CODE::CRITICAL_CODE, QString("Critical error start service: %1").arg(e.what()));
+        _errorString = QString("Critical error start service: %1").arg(e.what());
+        _loger->sendLogMsg(TDBLoger::MSG_CODE::CRITICAL_CODE, _errorString);
 
-        exit(EXIT_CODE::SERVICE_START_ERR);
+        QCoreApplication::exit(EXIT_CODE::SERVICE_START_ERR);
     }
 }
 
@@ -137,28 +127,27 @@ void Service::stop()
     }
     catch (const std::exception &e)
     {
-        _loger->sendLogMsg(TDBLoger::MSG_CODE::CRITICAL_CODE, QString("Critical error stop service: %1").arg(e.what()));
+        _errorString = QString("Critical error stop service: %1").arg(e.what());
+        _loger->sendLogMsg(TDBLoger::MSG_CODE::CRITICAL_CODE, _errorString);
 
-        exit(EXIT_CODE::SERVICE_STOP_ERR);
+        QCoreApplication::exit(EXIT_CODE::SERVICE_STOP_ERR);
     }
 }
 
 void Service::errorOccurredLoger(Common::EXIT_CODE errorCode, const QString &errorString)
 {
     QString msg = QString("Critical error while the loger is running. Code: %1 Message: %2").arg(errorCode).arg(errorString);
-    qCritical() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg(msg);
-    Common::writeLogFile("ERR>", msg);
+    qCritical() << msg;
 
-    exit(errorCode);
+    QCoreApplication::exit(errorCode);
 }
 
 void Service::errorOccurredCore(Common::EXIT_CODE errorCode, const QString &errorString)
 {
     QString msg = QString("Critical error while the core is running. Code: %1 Message: %2").arg(errorCode).arg(errorString);
-    qCritical() << QString("%1 %2").arg(QTime::currentTime().toString(SIMPLY_TIME_FORMAT)).arg(msg);
     _loger->sendLogMsg(Common::TDBLoger::MSG_CODE::CRITICAL_CODE, msg);
 
-    exit(errorCode);
+    QCoreApplication::exit(errorCode);
 }
 
 

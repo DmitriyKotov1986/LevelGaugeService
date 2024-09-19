@@ -23,6 +23,8 @@ public:
 
     bool operator==(const TankID& other) const;
 
+    QString toString() const;
+
 private:
     QString _levelGaugeCode; //код измерительной системы
     quint8 _tankNumber = 0; //номер резервуара

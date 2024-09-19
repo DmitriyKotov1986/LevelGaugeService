@@ -15,14 +15,17 @@ static constexpr int MIN_TIME_FINISH_INTAKE = 60 * MIN_STEP_COUNT_FINISH_INTAKE;
 static const int MIN_STEP_COUNT_START_PUMPING_OUT = 5;   //время полочки в начале отпуска топлива
 static const int MIN_STEP_COUNT_FINISH_PUMPING_OUT = 10; //время полочки по окончанию отпуска топлива
 
-static const int SKIP_TIME = 50;
+static const int SKIP_TIME = 40; ///< минимальное время между последним имеющимся статусом и вновь добалемым
 
 static constexpr int TIME_TO_SAVE = std::max(MIN_TIME_START_INTAKE, MIN_STEP_COUNT_START_PUMPING_OUT * 60) + 60;
 
 static constexpr int AZS_CONNECTION_TIMEOUT = 60 * 10;     //Таймаут обрыва связи с уровнемером, сек
 static const float FLOAT_EPSILON = 0.0000001f;
 
-Tank::Tank(const LevelGaugeService::TankConfig* tankConfig, TankStatusesList&& tankSavedStatuses, QObject *parent /* = nullptr) */)
+///////////////////////////////////////////////////////////////////////////////
+/// Class Tank
+///
+Tank::Tank(const LevelGaugeService::TankConfig* tankConfig, const TankStatusesList& tankSavedStatuses, QObject *parent /* = nullptr) */)
     : QObject{parent}
     , _tankConfig(tankConfig)
     , _rg(QRandomGenerator::global())
@@ -35,7 +38,7 @@ Tank::Tank(const LevelGaugeService::TankConfig* tankConfig, TankStatusesList&& t
 
     for (auto& tankStatus: tankSavedStatuses)
     {
-        addStatus(std::move(tankStatus));
+        addStatus(tankStatus);
     }
 
     if (!_tankStatuses.empty())
@@ -59,42 +62,44 @@ Tank::~Tank()
 
 void Tank::start()
 {
-    Q_ASSERT(_addEndTimer == nullptr);
+    Q_ASSERT(!_isStarted);
 
-    _addEndTimer = new QTimer;
-
-    QObject::connect(_addEndTimer, SIGNAL(timeout()), SLOT(addStatusEnd()));
-
-
+    Q_ASSERT(_saveToDBTimer == nullptr);
 
     _saveToDBTimer = new QTimer;
 
     QObject::connect(_saveToDBTimer, SIGNAL(timeout()), SLOT(sendNewStatusesToSave()));
 
+    // Start
     _saveToDBTimer->start(60000);
+
+    _isStarted = true;
+
+    emit started(_tankConfig->tankId());
 }
 
 void Tank::stop()
 {
-    delete _addEndTimer;
-    _addEndTimer = nullptr;
+    if (!_isStarted)
+    {
+        return;
+    }
 
     delete _saveToDBTimer;
     _saveToDBTimer = nullptr;
+
+    _isStarted = false;
 
     emit finished();
 }
 
 void Tank::newStatuses(const TankID &id, const TankStatusesList &tankStatuses)
 {
+    Q_ASSERT(_isStarted);
+
     if (id != _tankConfig->tankId())
     {
         return;
-    }
-
-    if (!_addEndTimer->isActive())
-    {
-        _addEndTimer->start(60000);
     }
 
     if (tankStatuses.empty())
@@ -102,35 +107,7 @@ void Tank::newStatuses(const TankID &id, const TankStatusesList &tankStatuses)
         return;
     }
 
-    const auto lastStatusDateTime = _tankStatuses.empty() ? QDateTime::currentDateTime().addMonths(-1) : _tankStatuses.crbegin()->first.addSecs(SKIP_TIME);
-
-    //копируем только те статусы, которые имеют метку времени позже уже имеющихся
-    TankStatusesList tankStatusesSorted(tankStatuses.size());
-    auto tankStatusesSorted_it = std::copy_if(tankStatuses.begin(), tankStatuses.end(), tankStatusesSorted.begin(),
-        [&lastStatusDateTime](const auto& status)
-        {
-            return status.getTankStatusData().dateTime > lastStatusDateTime;
-        });
-    tankStatusesSorted.erase(tankStatusesSorted_it, tankStatusesSorted.end());
-
-    //сортируем статусы по возрастанию метки времени
-    tankStatusesSorted.sort(
-        [](const auto& status1, const auto& status2)
-        {
-            return status1.getTankStatusData().dateTime < status2.getTankStatusData().dateTime;
-        });
-
-    for (auto& tankStatus:  tankStatusesSorted)
-    {
-        checkLimits(&tankStatus);
-    }
-
-    if (tankStatusesSorted.empty())
-    {
-        return;
-    }
-
-    addStatuses(tankStatusesSorted);
+    addStatuses(tankStatuses);
 
     findIntake();
     findPumpingOut();
@@ -138,19 +115,34 @@ void Tank::newStatuses(const TankID &id, const TankStatusesList &tankStatuses)
 
 void Tank::addStatuses(const TankStatusesList &tankStatuses)
 {
-    for (const auto& tankStatus: tankStatuses)
+    ///< Удаляем все неиспользуемые статусы, которые раньше самого раннего из имеющехся
+    const auto lastStatusDateTime = _tankStatuses.empty() ? QDateTime::currentDateTime().addYears(-1) : _tankStatuses.crbegin()->first.addSecs(SKIP_TIME);
+    auto tankStatusesSorted = tankStatuses;
+    const auto removeCount = tankStatusesSorted.filtered(lastStatusDateTime);
+    if (removeCount != 0)
+    {
+        emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::WARNING_CODE, QString("Some statuses was skipped because there is already a status with a later date: %1. Count skipped statuses: %2")
+                        .arg(_tankStatuses.crbegin()->first.toString(DATETIME_FORMAT))
+                        .arg(removeCount));
+    }
+
+    ///< Если статусов больше нет - выходим, делать больше нечего
+    if (tankStatusesSorted.empty())
+    {
+        return;
+    }
+
+    for (auto& tankStatus: tankStatusesSorted)
+    {
+        checkLimits(&tankStatus);
+    }
+
+    //На этом
+    for (const auto& tankStatus: tankStatusesSorted)
     {
         if (_tankStatuses.empty())
         {
             addStatusesRange(tankStatus);
-
-            continue;
-        }
-        if (tankStatus.dateTime() <= _tankStatuses.crbegin()->first)
-        {
-            emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::WARNING_CODE, QString("Status with date: %1 will be skipped becuse there is already a status with a later date: %2")
-                            .arg(tankStatus.dateTime().toString(DATETIME_FORMAT))
-                            .arg(_tankStatuses.crbegin()->first.toString(DATETIME_FORMAT)));
 
             continue;
         }
@@ -176,13 +168,7 @@ void Tank::addStatuses(const TankStatusesList &tankStatuses)
 
 void Tank::addStatus(const LevelGaugeService::TankStatus& tankStatus)
 {
-    TankStatus tmp(tankStatus);
-    addStatus(std::move(tmp));
-}
-
-void Tank::addStatus(LevelGaugeService::TankStatus &&tankStatus)
-{
-    auto tankStatus_p = std::make_unique<TankStatus>(std::move(tankStatus));
+    auto tankStatus_p = std::make_unique<TankStatus>(tankStatus);
     if (tankStatus_p->status() != TankConfig::Status::REPAIR)
     {
         if (_isIntake.has_value())
@@ -267,6 +253,8 @@ void Tank::checkLimits(LevelGaugeService::TankStatus* status) const
 
 void Tank::sendNewStatusesToSave()
 {
+    addStatusEnd();
+
     const auto startSave_it = _tankStatuses.upper_bound(_lastSendToSaveDateTime);
     if (startSave_it == _tankStatuses.end())
     {
@@ -304,74 +292,74 @@ void Tank::addStatusesRange(const LevelGaugeService::TankStatus& tankStatus)
 
     //время на текущем шаге
     auto time = lastTankStatus.dateTime();
+    const auto rangeTimeSec = time.secsTo(tankStatus.dateTime());
 
     //количество шагов которое у нас есть для вставки
-    int stepCount = static_cast<int>(static_cast<double>(time.secsTo(tankStatus.dateTime())) / 60.0);
+    auto stepCount = static_cast<int>(static_cast<double>(rangeTimeSec / 60.0));
 
-    //вычисляем дельту
-    TankConfig::Delta delta;
-
-    do
+    if (stepCount > 0 && rangeTimeSec > 100)
     {
-        delta.height = (tankStatus.height() - lastTankStatus.height()) / static_cast<float>(stepCount + 1);
-        delta.density = (tankStatus.density() - lastTankStatus.density()) / static_cast<float>(stepCount + 1);
-        delta.temp = (tankStatus.temp() - lastTankStatus.temp()) / static_cast<float>(stepCount + 1);
-        delta.volume = (tankStatus.volume() - lastTankStatus.volume()) / static_cast<float>(stepCount + 1);
-        delta.mass = (tankStatus.mass() - lastTankStatus.mass()) / static_cast<float>(stepCount + 1);
+        //вычисляем дельту
+        TankConfig::Delta delta;
 
-        //Если дельты слишком большие - то увеличиваем количество необходимых шагов
-        const auto& deltaMax = _tankConfig->deltaMax();
-        if ((std::abs(delta.height)  >= deltaMax.height)  ||
-            (std::abs(delta.density) >= deltaMax.density) ||
-            (std::abs(delta.temp)    >= deltaMax.temp)    ||
-            (std::abs(delta.volume)  >= deltaMax.volume)  ||
-            (std::abs(delta.mass)    >= deltaMax.mass ))
-
+        do
         {
-            ++stepCount;
+            delta.height = (tankStatus.height() - lastTankStatus.height()) / static_cast<float>(stepCount + 1);
+            delta.density = (tankStatus.density() - lastTankStatus.density()) / static_cast<float>(stepCount + 1);
+            delta.temp = (tankStatus.temp() - lastTankStatus.temp()) / static_cast<float>(stepCount + 1);
+            delta.volume = (tankStatus.volume() - lastTankStatus.volume()) / static_cast<float>(stepCount + 1);
+            delta.mass = (tankStatus.mass() - lastTankStatus.mass()) / static_cast<float>(stepCount + 1);
+
+            //Если дельты слишком большие - то увеличиваем количество необходимых шагов
+            const auto& deltaMax = _tankConfig->deltaMax();
+            if ((std::abs(delta.height)  >= deltaMax.height)  ||
+                (std::abs(delta.density) >= deltaMax.density) ||
+                (std::abs(delta.temp)    >= deltaMax.temp)    ||
+                (std::abs(delta.volume)  >= deltaMax.volume)  ||
+                (std::abs(delta.mass)    >= deltaMax.mass ))
+
+            {
+                ++stepCount;
+            }
+            else
+            {
+                break;
+            }
         }
-        else
+        while (true);
+
+        const auto deltaTime = rangeTimeSec / (stepCount + 1);
+
+        auto tmp = TankStatus(lastTankStatus); //статус на текущем шаге
+        tmp.setAdditionFlag(static_cast<quint8>(TankStatus::AdditionFlag::CALCULATE));
+        tmp.setStatus(tankStatus.status());
+
+        for (auto i = 0; i < stepCount; ++i)
         {
-            break;
+            time = time.addSecs(deltaTime);
+
+            tmp.setDensity(tmp.density() + delta.density);
+            tmp.setHeight(tmp.height() + delta.height);
+            tmp.setTemp(tmp.temp() + delta.temp);
+            tmp.setVolume(tmp.volume() + delta.volume);
+            tmp.setMass(tmp.mass() + delta.mass);
+            tmp.setDateTime(time);
+
+            TankStatus statusForAdd(tmp);
+
+            //добавить рандомный +/-
+            addRandom(&statusForAdd);
+            checkLimits(&statusForAdd);
+            addStatus(statusForAdd);
         }
-    }
-    while (true);
 
-    auto tmp = TankStatus(lastTankStatus); //статус на текущем шаге
-    tmp.setAdditionFlag(static_cast<quint8>(TankStatus::AdditionFlag::CALCULATE));
-    tmp.setStatus(tankStatus.status());
-
-    for (auto i = 0; i < stepCount; ++i)
-    {
-        time = time.addSecs(60);
-
-        tmp.setDensity(tmp.density() + delta.density);
-        tmp.setHeight(tmp.height() + delta.height);
-        tmp.setTemp(tmp.temp() + delta.temp);
-        tmp.setVolume(tmp.volume() + delta.volume);
-        tmp.setMass(tmp.mass() + delta.mass);
-        tmp.setDateTime(time);
-
-        TankStatus statusForAdd(tmp);
-
-        //добавить рандомный +/-
-        addRandom(&statusForAdd);
-        checkLimits(&statusForAdd);
-        addStatus(statusForAdd);
-    }
-
-    if (stepCount > 1)
-    {
         emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::INFORMATION_CODE, QString("Added range. Start time: %1 Finish time: %2. Steps count: %3")
                         .arg(lastTankStatus.dateTime().toString(DATETIME_FORMAT))
                         .arg(time.toString(DATETIME_FORMAT))
                         .arg(stepCount));
     }
 
-    time = time.addSecs(60);
-    TankStatus statusForAdd(tankStatus);
-    statusForAdd.setDateTime(time);
-    addStatus(statusForAdd);
+    addStatus(tankStatus);
 }
 
 void Tank::addStatusesIntake(const TankStatus& tankStatus)
@@ -456,7 +444,7 @@ void Tank::addStatusEnd()
 {
     if (_tankStatuses.empty())
     {
-        emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::WARNING_CODE, "There is no status for the tank");
+        emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::WARNING_CODE, "Cannot add statuses to end. There is no status for the tank");
 
         return;
     }
@@ -525,7 +513,7 @@ void Tank::clearTankStatuses()
     auto lastTankStatuses_it = _tankStatuses.end();
     for (auto tankStatuses_it = _tankStatuses.begin(); tankStatuses_it != _tankStatuses.end(); ++tankStatuses_it)
     {
-        if (tankStatuses_it->first < _tankConfig->lastIntake())
+        if (tankStatuses_it->first < _tankConfig->lastIntake() /* && {last Pamping Out})*/)
         {
             lastTankStatuses_it = tankStatuses_it;
         }
@@ -623,14 +611,19 @@ void Tank::findIntake()
     Q_ASSERT(start_it != _tankStatuses.end());
 
     emit sendLogMsg(_tankConfig->tankId(), TDBLoger::MSG_CODE::INFORMATION_CODE,
-                    QString("Find finished intake. Start: %1. Finish: %2. Delta volume: %3, mass: %4, height: %5, density: %6, temp: %7")
+                    QString("Find finished intake. Start: %1. Finish: %2. Volume: %3->%4, mass: %5->%6, height: %7->%8, density: %9->%10, temp: %11->%12")
                         .arg(_isIntake.value().toString(DATETIME_FORMAT))
                         .arg(finish_it->first.toString(DATETIME_FORMAT))
-                        .arg(finish_it->second->volume() - start_it->second->volume())
-                        .arg(finish_it->second->mass() - start_it->second->mass())
-                        .arg(finish_it->second->height() - start_it->second->height())
-                        .arg(finish_it->second->density() - start_it->second->density())
-                        .arg(finish_it->second->temp() - start_it->second->temp())
+                        .arg(start_it->second->volume())
+                        .arg(finish_it->second->volume())
+                        .arg(start_it->second->mass())
+                        .arg(finish_it->second->mass())
+                        .arg(start_it->second->height())
+                        .arg(finish_it->second->height())
+                        .arg(start_it->second->density())
+                        .arg(finish_it->second->density())
+                        .arg(start_it->second->temp())
+                        .arg(finish_it->second->temp())
                     );
 
     IntakesList intakesList;
@@ -638,7 +631,7 @@ void Tank::findIntake()
 
     intakesList.emplace_back(std::move(tmp));
 
-    emit calculateIntakes(_tankConfig->tankId(), intakesList);
+     emit calculateIntakes(_tankConfig->tankId(), intakesList);
 
     _isIntake.reset();
 }
@@ -695,7 +688,7 @@ Tank::TankStatusesIterator Tank::getFinishedPumpingOut()
 
 void Tank::findPumpingOut()
 {
-    if (_tankStatuses.size() <  MIN_STEP_COUNT_START_PUMPING_OUT + MIN_STEP_COUNT_FINISH_PUMPING_OUT)
+/*    if (_tankStatuses.size() <  MIN_STEP_COUNT_START_PUMPING_OUT + MIN_STEP_COUNT_FINISH_PUMPING_OUT)
     {
         return;
     }
@@ -746,4 +739,15 @@ void Tank::findPumpingOut()
                     );
 
     _isPumpingOut.reset();
+*/
+}
+
+void Tank::errorOccurredSync(Common::EXIT_CODE errorCode, const QString &errorString)
+{
+    emit errorOccurred(_tankConfig->tankId(), errorCode, QString("Error Sync: %1").arg(errorString));
+}
+
+void Tank::sendLogMsgSync(Common::TDBLoger::MSG_CODE code, const QString& msg)
+{
+    emit sendLogMsg(_tankConfig->tankId(), code, QString("Sync: %1").arg(msg));
 }

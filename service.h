@@ -20,13 +20,11 @@ class Service final
     Q_OBJECT
 
 public:
-    Service() = delete;
-    Service(const Service&) = delete;
-    Service& operator=(const Service&) = delete;
-    Service(Service&&) = delete;
-    Service& operator=(Service&&) = delete;
+    explicit Service(int& argc, char **argv);
 
-    explicit Service(int argc, char **argv);
+    /*!
+        Деструктор
+    */
     ~Service();
 
     QString errorString();
@@ -36,11 +34,14 @@ public slots:
     void errorOccurredLoger(Common::EXIT_CODE errorCode, const QString &errorString);
     void errorOccurredCore(Common::EXIT_CODE errorCode, const QString &errorString);
 
-protected:
-    virtual void start() override;  //Запус сервиса
-    virtual void pause() override;  //Установка сервиса на паузу
-    virtual void resume() override; //Востановление сервиса после паузы
-    virtual void stop() override;   //Остановка сервиса
+private:
+    Service() = delete;
+    Q_DISABLE_COPY_MOVE(Service)
+
+    void start() override;  //Запус сервиса
+    void pause() override;  //Установка сервиса на паузу
+    void resume() override; //Востановление сервиса после паузы
+    void stop() override;   //Остановка сервиса
 
 private:
     bool _isRun = false;
